@@ -9,7 +9,7 @@ import time
 import unicodedata
 from contextlib import asynccontextmanager
 from collections import defaultdict
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,6 +20,7 @@ from slowapi.util import get_remote_address
 
 from core import process_query
 from es import AICandidateDB
+import config
 
 log = logging.getLogger(__name__)
 
@@ -33,18 +34,23 @@ limiter = Limiter(key_func=get_remote_address)
 # ---------------------------------------------------------------------------
 @functools.lru_cache(maxsize=256)
 def _cached_process_query(question: str):
+    global db
     return process_query(question, db)
 
 # ---------------------------------------------------------------------------
 # App lifecycle – DB is initialised once at startup, not at import time
 # ---------------------------------------------------------------------------
-db: AICandidateDB | None = None
+db: Optional[AICandidateDB] = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global db
     try:
-        db = AICandidateDB()
+        # Validate configuration before starting
+        if not config.validate_config():
+            log.error("Configuration validation failed. Starting with limited functionality.")
+        
+        db = AICandidateDB(verify_certs=False)  # Set to True in production with valid certs
         log.info("Database connection established.")
     except Exception as exc:
         log.error("Failed to connect to database on startup: %s", exc)
@@ -62,7 +68,7 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Restrict in production
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )

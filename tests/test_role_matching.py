@@ -1,10 +1,10 @@
 import unittest
 
-from core import (
+from core.role_filter import (
     _extract_core_query_tokens,
-    _filter_single_role_candidates,
-    _format_direct_answer,
+    filter_single_role_candidates as _filter_single_role_candidates,
 )
+from core.llm_engine import format_direct_answer as _format_direct_answer
 
 
 class RoleMatchingRegressionTests(unittest.TestCase):
