@@ -1,43 +1,70 @@
-"""Centralized configuration loaded from environment variables."""
+"""Centralized configuration loaded from environment variables with validation."""
 
 import os
 import logging
+from typing import Final
 
 import dotenv
 
 dotenv.load_dotenv()
 
-# Logging
+# ---------------------------------------------------------------------------
+# Logging configuration
+# ---------------------------------------------------------------------------
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 
-# Elasticsearch
-ES_HOST = os.getenv("ES_HOST", "http://localhost:9200")
-ES_USER = os.getenv("ES_USER", "elastic")
-ES_PASS = os.getenv("ES_PASS", "ES_PASS")
-ES_INDEX = os.getenv("ES_INDEX", "lanh_dao")
+log = logging.getLogger(__name__)
 
-# DeepSeek LLM
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
-DEEPSEEK_BASE_URL = "https://api.deepseek.com"
-# Main model for answer generation. Override via .env if DeepSeek changes the name.
-DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
-# Faster/cheaper model for lightweight tasks like intent classification.
-# Set to the same value as DEEPSEEK_MODEL if no separate fast model is available.
-DEEPSEEK_MODEL_FAST = os.getenv("DEEPSEEK_MODEL_FAST", DEEPSEEK_MODEL)
+# ---------------------------------------------------------------------------
+# Elasticsearch configuration
+# ---------------------------------------------------------------------------
+ES_HOST: Final[str] = os.getenv("ES_HOST", "http://localhost:9200")
+ES_USER: Final[str] = os.getenv("ES_USER", "elastic")
+ES_PASS: Final[str] = os.getenv("ES_PASS", "")
+ES_INDEX: Final[str] = os.getenv("ES_INDEX", "lanh_dao")
 
-# Web search (Serper)
-SERPER_API_KEY = os.getenv("SERPER_API_KEY", "")
-SERPER_URL = "https://google.serper.dev/search"
-SERPER_NEWS_URL = "https://google.serper.dev/news"
-SERPER_TIMEOUT_SECONDS = 10
-SERPER_MAX_RESULTS = 3
+# Validate ES configuration
+if not ES_PASS:
+    log.warning("ES_PASS is not set. Using empty password (insecure for production).")
 
-# Prioritize official/state and mainstream Vietnamese news sources.
-OFFICIAL_NEWS_DOMAINS = {
+if ES_HOST.startswith("https://"):
+    log.info("Elasticsearch configured with HTTPS (recommended for production).")
+else:
+    log.warning("Elasticsearch configured without HTTPS. Consider using HTTPS in production.")
+
+# ---------------------------------------------------------------------------
+# DeepSeek LLM configuration
+# ---------------------------------------------------------------------------
+DEEPSEEK_API_KEY: Final[str] = os.getenv("DEEPSEEK_API_KEY", "")
+DEEPSEEK_BASE_URL: Final[str] = "https://api.deepseek.com"
+DEEPSEEK_MODEL: Final[str] = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
+DEEPSEEK_MODEL_FAST: Final[str] = os.getenv("DEEPSEEK_MODEL_FAST", DEEPSEEK_MODEL)
+
+# Validate LLM configuration
+if not DEEPSEEK_API_KEY:
+    log.error("DEEPSEEK_API_KEY is not set. LLM features will not work.")
+
+# ---------------------------------------------------------------------------
+# Web search (Serper) configuration
+# ---------------------------------------------------------------------------
+SERPER_API_KEY: Final[str] = os.getenv("SERPER_API_KEY", "")
+SERPER_URL: Final[str] = "https://google.serper.dev/search"
+SERPER_NEWS_URL: Final[str] = "https://google.serper.dev/news"
+SERPER_TIMEOUT_SECONDS: Final[int] = 10
+SERPER_MAX_RESULTS: Final[int] = 3
+
+# Validate Serper configuration
+if not SERPER_API_KEY:
+    log.warning("SERPER_API_KEY is not set. Internet search features will be disabled.")
+
+# ---------------------------------------------------------------------------
+# News domain filtering
+# ---------------------------------------------------------------------------
+OFFICIAL_NEWS_DOMAINS: Final[set[str]] = {
     "chinhphu.vn",
     "baochinhphu.vn",
     "nhandan.vn",
@@ -57,12 +84,9 @@ OFFICIAL_NEWS_DOMAINS = {
     "vnexpress.net",
 }
 
-# Lower-trust sources for factual leadership activity queries.
-DEPRIORITIZED_NEWS_DOMAINS = {
-}
+DEPRIORITIZED_NEWS_DOMAINS: Final[set[str]] = set()
 
-# Completely blocked: social media, blogs, tabloid / entertainment aggregators.
-BLOCKED_NEWS_DOMAINS = {
+BLOCKED_NEWS_DOMAINS: Final[set[str]] = {
     # Social media
     "facebook.com",
     "m.facebook.com",
@@ -92,21 +116,28 @@ BLOCKED_NEWS_DOMAINS = {
     "nguoiquansat.vn",
 }
 
+# ---------------------------------------------------------------------------
 # Search parameters
-SINGLE_SEARCH_LIMIT = 12
-LIST_SEARCH_LIMIT = 20
-SCORE_RELEVANCE_RATIO = 0.85
-MIN_SCORE_THRESHOLD = 5.0
-LIST_METADATA_CAP = 20
-KNN_NUM_CANDIDATES = 20
+# ---------------------------------------------------------------------------
+SINGLE_SEARCH_LIMIT: Final[int] = 12
+LIST_SEARCH_LIMIT: Final[int] = 20
+SCORE_RELEVANCE_RATIO: Final[float] = 0.85
+MIN_SCORE_THRESHOLD: Final[float] = 5.0
+LIST_METADATA_CAP: Final[int] = 20
+KNN_NUM_CANDIDATES: Final[int] = 20
 
+# ---------------------------------------------------------------------------
 # Internet trigger keywords
-NEWS_KEYWORDS = [
+# ---------------------------------------------------------------------------
+NEWS_KEYWORDS: Final[list[str]] = [
     "chỉ đạo", "hoạt động", "mới nhất", "mới", "gần đây",
     "tin tức", "phát biểu", "gặp gỡ", "tiếp đón", "thăm", "ký kết",
 ]
 
-SPECIFIC_ROLE_HINTS = {
+# ---------------------------------------------------------------------------
+# Role matching configuration
+# ---------------------------------------------------------------------------
+SPECIFIC_ROLE_HINTS: Final[set[str]] = {
     "bo truong",
     "thu truong",
     "thu tuong",
@@ -124,30 +155,12 @@ SPECIFIC_ROLE_HINTS = {
     "chinh phu",
 }
 
-GENERIC_QUERY_FILLER_TOKENS = {
-    "la",
-    "ai",
-    "co",
-    "gi",
-    "moi",
-    "nhat",
-    "gan",
-    "day",
-    "nao",
-    "khong",
-    "vay",
-    "the",
-    "sao",
-    "cho",
-    "toi",
-    "xin",
-    "hoi",
-    "tim",
-    "kiem",
+GENERIC_QUERY_FILLER_TOKENS: Final[set[str]] = {
+    "la", "ai", "co", "gi", "moi", "nhat", "gan", "day", "nao",
+    "khong", "vay", "the", "sao", "cho", "toi", "xin", "hoi", "tim", "kiem",
 }
 
-
-GENERIC_ENTITY_PHRASES = {
+GENERIC_ENTITY_PHRASES: Final[set[str]] = {
     "lanh dao",
     "lanh đao",
     "can bo",
@@ -156,8 +169,7 @@ GENERIC_ENTITY_PHRASES = {
     "sep",
 }
 
-# Generic role disambiguation (no title-specific hardcode)
-ROLE_MODIFIER_PHRASES = {
+ROLE_MODIFIER_PHRASES: Final[set[str]] = {
     "pho",
     "thuong truc",
     "quyen",
@@ -165,26 +177,41 @@ ROLE_MODIFIER_PHRASES = {
     "tro ly",
 }
 
-ROLE_QUERY_FILLER_TOKENS = GENERIC_QUERY_FILLER_TOKENS | {
-    "co",
-    "the",
-    "cho",
-    "biet",
-    # Vietnamese verb particles commonly appearing in role questions
-    # e.g. "ai đang làm thủ tướng", "hiện nay ai giữ chức"
-    "dang",   # đang (currently)
-    "lam",    # làm (work as)
-    "hien",   # hiện (currently)
-    "nay",    # nay (now)
-    "giu",    # giữ (hold/occupy a position)
-    "chuc",   # chức (generic word for position)
-    "dung",   # đứng (head/stand)
-    "dau",    # đầu (first/head)
-    "duoc",   # được (be/receive)
+ROLE_QUERY_FILLER_TOKENS: Final[set[str]] = GENERIC_QUERY_FILLER_TOKENS | {
+    "co", "the", "cho", "biet",
+    "dang", "lam", "hien", "nay", "giu", "chuc", "dung", "dau", "duoc",
 }
 
-# Rerank/filter weights for role-like queries
-ROLE_MISSING_MODIFIER_PENALTY = 25.0
-ROLE_EXTRA_MODIFIER_PENALTY = 8.0
-ROLE_CORE_OVERLAP_WEIGHT = 5.0
-ROLE_MIN_CORE_OVERLAP = 0.6
+ROLE_MISSING_MODIFIER_PENALTY: Final[float] = 25.0
+ROLE_EXTRA_MODIFIER_PENALTY: Final[float] = 8.0
+ROLE_CORE_OVERLAP_WEIGHT: Final[float] = 5.0
+ROLE_MIN_CORE_OVERLAP: Final[float] = 0.6
+
+
+def validate_config() -> bool:
+    """Validate critical configuration values.
+    
+    Returns True if all required configs are present, False otherwise.
+    Logs warnings for optional missing configs.
+    """
+    errors = []
+    warnings = []
+    
+    if not DEEPSEEK_API_KEY:
+        errors.append("DEEPSEEK_API_KEY is required but not set")
+    
+    if not ES_PASS:
+        warnings.append("ES_PASS is empty (insecure for production)")
+    
+    if not SERPER_API_KEY:
+        warnings.append("SERPER_API_KEY is not set (internet search disabled)")
+    
+    for warning in warnings:
+        log.warning(warning)
+    
+    if errors:
+        for error in errors:
+            log.error(error)
+        return False
+    
+    return True

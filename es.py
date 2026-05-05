@@ -4,6 +4,7 @@ import csv
 import hashlib
 import logging
 import os
+from typing import Optional
 
 from elasticsearch import Elasticsearch, helpers
 from sentence_transformers import SentenceTransformer
@@ -12,8 +13,18 @@ import config
 
 log = logging.getLogger(__name__)
 
-_model = SentenceTransformer("AITeamVN/Vietnamese_Embedding")
-_VECTOR_DIMS = _model.get_sentence_embedding_dimension()
+_model: Optional[SentenceTransformer] = None
+_VECTOR_DIMS: int = 0
+
+
+def _get_model() -> SentenceTransformer:
+    """Lazy-load the embedding model to avoid import-time side effects."""
+    global _model, _VECTOR_DIMS
+    if _model is None:
+        _model = SentenceTransformer("AITeamVN/Vietnamese_Embedding")
+        _VECTOR_DIMS = _model.get_sentence_embedding_dimension()
+    return _model
+
 
 # Abbreviation mappings applied before every search query
 _ABBREVIATIONS = {
@@ -25,19 +36,23 @@ _ABBREVIATIONS = {
 class AICandidateDB:
     """Manages the Elasticsearch index for leadership candidate data."""
 
-    def __init__(self):
+    def __init__(self, verify_certs: bool = False):
         self.es = Elasticsearch(
             [config.ES_HOST],
             basic_auth=(config.ES_USER, config.ES_PASS),
-            verify_certs=False,
+            verify_certs=verify_certs,
         )
         self.index_name = config.ES_INDEX
-        self.model = _model
+        self._model = _get_model()
 
         self._ensure_index()
         if not self._has_data():
             self.sync_from_csv("data - danh_sach.csv")
 
+    @property
+    def model(self) -> SentenceTransformer:
+        """Return the embedding model instance."""
+        return self._model
 
     def _ensure_index(self):
         """Create the index with explicit field mapping if it does not exist."""
@@ -57,7 +72,7 @@ class AICandidateDB:
                         "similarity": "cosine",
                     },
                 }
-            }
+            },
         }
         self.es.indices.create(index=self.index_name, body=mapping)
         log.info("Created index '%s' (vector dims=%d)", self.index_name, _VECTOR_DIMS)
@@ -68,7 +83,6 @@ class AICandidateDB:
             return self.es.count(index=self.index_name)["count"] > 0
         except Exception:
             return False
-
 
     def sync_from_csv(self, file_path):
         """Bulk-import candidates from CSV with deterministic document IDs.
@@ -90,7 +104,7 @@ class AICandidateDB:
                     nam_sinh = int(row["Nam_Sinh"]) if row["Nam_Sinh"] else 0
 
                     doc_id = hashlib.md5(f"{name}|{chuc_vu}".encode()).hexdigest()
-                    vector = self.model.encode(chuc_vu).tolist()
+                    vector = self._model.encode(chuc_vu).tolist()
 
                     yield {
                         "_index": self.index_name,
@@ -109,14 +123,13 @@ class AICandidateDB:
         except Exception as exc:
             log.error("Bulk sync failed: %s", exc)
 
-
     def search(self, user_input, limit=5, return_debug=False):
         """Run a hybrid lexical + KNN vector search.
 
         Returns a list of tuples: (name, birth_year, position, score).
         """
         query_text = self._normalise(user_input)
-        query_vector = self.model.encode(query_text).tolist()
+        query_vector = self._model.encode(query_text).tolist()
 
         body = {
             "size": limit,
@@ -195,7 +208,6 @@ class AICandidateDB:
         }
 
         return results, debug_payload
-
 
     @staticmethod
     def _normalise(text):

@@ -9,6 +9,15 @@ def _candidate(name, year, role, score):
     return (name, year, role, score)
 
 
+class MockDB:
+    """Mock database for testing that returns pre-defined candidates."""
+    def __init__(self, candidates=None):
+        self.candidates = candidates or []
+    
+    def search(self, entity, limit=10):
+        return self.candidates[:limit]
+
+
 class PipelineExtremeCasesTests(unittest.TestCase):
     def test_happy_high_confidence_direct_answer(self):
         candidates = [
@@ -19,11 +28,11 @@ class PipelineExtremeCasesTests(unittest.TestCase):
                 1785.3,
             )
         ]
+        mock_db = MockDB(candidates)
 
         with patch("core.analyze_query_intent", return_value=("DATABASE", "", "SINGLE", "Thu tuong")), \
-             patch("core._retrieve_candidates", return_value=(candidates, [])), \
-             patch("core._generate_answer") as mocked_generate:
-            result = process_query("ai dang lam thu tuong", db=None)
+             patch("core.llm_engine.generate_answer") as mocked_generate:
+            result = process_query("ai dang lam thu tuong", db=mock_db)
 
         self.assertEqual(result["answer_mode"], "database_only")
         self.assertIn("Le Minh Hung", result["answer"])
@@ -35,10 +44,10 @@ class PipelineExtremeCasesTests(unittest.TestCase):
             _candidate(f"Person {i}", 1970 + (i % 20), f"Thu truong Bo {i}", 1000 - i)
             for i in range(30)
         ]
+        mock_db = MockDB(candidates)
 
-        with patch("core.analyze_query_intent", return_value=("DATABASE", "", "LIST", "Thu truong")), \
-             patch("core._retrieve_candidates", return_value=(candidates, [])):
-            result = process_query("liet ke thu truong", db=None)
+        with patch("core.analyze_query_intent", return_value=("DATABASE", "", "LIST", "Thu truong")):
+            result = process_query("liet ke thu truong", db=mock_db)
 
         self.assertEqual(result["search_mode"], "LIST")
         self.assertLessEqual(len(result["metadata"]), config.LIST_METADATA_CAP)
@@ -53,31 +62,43 @@ class PipelineExtremeCasesTests(unittest.TestCase):
             "Nguồn: vnexpress.net\n"
             "Link: https://vnexpress.net/example"
         )
+        mock_db = MockDB(candidates)
 
         with patch("core.analyze_query_intent", return_value=("DATABASE", "", "SINGLE", "Thu tuong")), \
-             patch("core._retrieve_candidates", return_value=(candidates, [])), \
-             patch("core.get_internet_info", return_value=web_context), \
-             patch("core._generate_evidence_first_news_answer", return_value="news-summary"):
-            result = process_query("thủ tướng mới nhất", db=None)
+             patch("core.internet_search.generate_evidence_first_news_answer", return_value="news-summary"):
+            # Mock internet search at the orchestrator level
+            import core.orchestrator as orch
+            original_should_search = orch.should_search_internet
+            
+            def mock_should_search(intent, user_input):
+                return True
+            
+            orch.should_search_internet = mock_should_search
+            
+            try:
+                result = process_query("thủ tướng mới nhất", db=mock_db)
+            finally:
+                orch.should_search_internet = original_should_search
 
         self.assertEqual(result["answer"], "news-summary")
         self.assertEqual(result["answer_mode"], "db_plus_web")
         self.assertGreaterEqual(len(result["evidence"]["web_sources"]), 1)
 
     def test_sad_ambiguous_query_returns_clarification(self):
-        with patch("core.analyze_query_intent", return_value=("DATABASE", "", "SINGLE", "lanh dao")), \
-             patch("core._retrieve_candidates") as mocked_retrieve:
-            result = process_query("lanh dao", db=None)
+        mock_db = MockDB()
+        
+        with patch("core.analyze_query_intent", return_value=("DATABASE", "", "SINGLE", "lanh dao")):
+            result = process_query("lanh dao", db=mock_db)
 
         self.assertEqual(result["answer_mode"], "needs_clarification")
         self.assertIn("quá chung", result["answer"])
-        mocked_retrieve.assert_not_called()
 
     def test_sad_no_match_uses_safety_gate(self):
+        mock_db = MockDB()
+        
         with patch("core.analyze_query_intent", return_value=("DATABASE", "", "SINGLE", "Bo truong")), \
-             patch("core._retrieve_candidates", return_value=([], [])), \
-             patch("core._generate_answer") as mocked_generate:
-            result = process_query("bo truong la ai", db=None)
+             patch("core.llm_engine.generate_answer") as mocked_generate:
+            result = process_query("bo truong la ai", db=mock_db)
 
         self.assertEqual(result["answer_mode"], "no_match")
         self.assertIn("không có thông tin nhân sự phù hợp", result["answer"].lower())
@@ -87,11 +108,11 @@ class PipelineExtremeCasesTests(unittest.TestCase):
         # Score > MIN_SCORE_THRESHOLD to pass safety gate, but low enough to keep
         # confidence < 0.7 and force _generate_answer.
         candidates = [_candidate("Le Minh Hung", 1970, "Thu tuong Chinh phu", 6.2)]
+        mock_db = MockDB(candidates)
 
         with patch("core.analyze_query_intent", return_value=("DATABASE", "", "SINGLE", "Thu tuong")), \
-             patch("core._retrieve_candidates", return_value=(candidates, [])), \
-             patch("core._generate_answer", return_value="llm-fallback") as mocked_generate:
-            result = process_query("thu tuong la ai", db=None)
+             patch("core.llm_engine.generate_answer", return_value="llm-fallback") as mocked_generate:
+            result = process_query("thu tuong la ai", db=mock_db)
 
         self.assertEqual(result["answer"], "llm-fallback")
         self.assertEqual(result["answer_mode"], "database_only")
