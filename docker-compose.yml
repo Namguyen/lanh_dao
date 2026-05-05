@@ -7,7 +7,7 @@ services:
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=true
-      - ELASTIC_PASSWORD=${ES_PASS:-changeme}
+      - ELASTIC_PASSWORD=9RZZdj2Z
       - xpack.security.http.ssl.enabled=false
     ports:
       - "9200:9200"
@@ -25,7 +25,7 @@ services:
     environment:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
       - ELASTICSEARCH_USERNAME=elastic
-      - ELASTICSEARCH_PASSWORD=${ES_PASS:-changeme}
+      - ELASTICSEARCH_PASSWORD=9RZZdj2Z
       - xpack.security.enabled=true
     ports:
       - "5601:5601"

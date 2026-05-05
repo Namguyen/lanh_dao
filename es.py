@@ -144,7 +144,7 @@ class AICandidateDB:
                 "bool": {
                     "should": [
                         {"match_phrase": {"Ten": {"query": query_text, "boost": 100}}},
-                        {"match_phrase": {"Chuc_Vu": {"query": query_text, "boost": 100}}},
+                        {"match_phrase": {"Chuc_Vu": {"query": query_text, "boost": 5}}},
                         {
                             "multi_match": {
                                 "query": query_text,

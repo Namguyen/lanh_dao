@@ -16,13 +16,59 @@ def _normalise_text(text: str) -> str:
     return " ".join(text.split())
 
 
+def entity_matches_position(normalized_entity: str, normalized_position: str) -> bool:
+    """Return True when a role entity matches a position segment.
+
+    Match policy is anchored subsequence on semicolon-separated segments:
+    - First token of entity must match first token of a segment
+    - Remaining entity tokens must appear in order within that segment
+
+    This allows inserts like "thuong truc" in
+    "pho thu tuong thuong truc chinh phu" for entity "pho thu tuong chinh phu",
+    while rejecting prefix-subset false matches like
+    entity "chu tich quoc hoi" vs segment "pho chu tich quoc hoi".
+    """
+    entity_tokens = normalized_entity.split()
+    if not entity_tokens:
+        return False
+
+    for segment in normalized_position.split(";"):
+        seg_tokens = segment.strip().split()
+        if not seg_tokens:
+            continue
+        if seg_tokens[0] != entity_tokens[0]:
+            continue
+
+        ei = 1
+        si = 1
+        while ei < len(entity_tokens) and si < len(seg_tokens):
+            if seg_tokens[si] == entity_tokens[ei]:
+                ei += 1
+            si += 1
+
+        if ei == len(entity_tokens):
+            return True
+
+    return False
+
+
 def _extract_modifier_phrases(normalized_text: str) -> set[str]:
     """Return configured modifier phrases appearing in the given normalized text."""
-    return {
-        phrase
-        for phrase in config.ROLE_MODIFIER_PHRASES
-        if phrase in normalized_text
-    }
+    text_tokens = normalized_text.split()
+    found: set[str] = set()
+
+    for phrase in config.ROLE_MODIFIER_PHRASES:
+        phrase_tokens = phrase.split()
+        n = len(phrase_tokens)
+        if not n:
+            continue
+
+        for i in range(len(text_tokens) - n + 1):
+            if text_tokens[i : i + n] == phrase_tokens:
+                found.add(phrase)
+                break
+
+    return found
 
 
 def _extract_core_query_tokens(normalized_query: str) -> list[str]:
@@ -128,7 +174,7 @@ def filter_single_role_candidates(candidates: list, normalized_query: str) -> li
     return filtered if filtered else candidates
 
 
-def apply_list_query_filters(results: list, user_input: str) -> list:
+def apply_list_query_filters(results: list, user_input: str, entity_only: str = "") -> list:
     """Apply precise filters for list/count queries to avoid undercounting.
 
     Use generic role alignment so LIST mode does not rely on title-specific rules.
@@ -182,6 +228,17 @@ def apply_list_query_filters(results: list, user_input: str) -> list:
 
         if org_filtered:
             filtered = org_filtered
+
+    # Phrase-level filtering for role entities.
+    if entity_only:
+        normalized_entity = _normalise_text(entity_only)
+        if _is_role_like_query(normalized_entity):
+            phrase_filtered = [
+                row for row in filtered
+                if entity_matches_position(normalized_entity, _normalise_text(row[2]))
+            ]
+            if phrase_filtered:
+                filtered = phrase_filtered
 
     # Deduplicate by full identity tuple while preserving ranking order.
     deduped = []

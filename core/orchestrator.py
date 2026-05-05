@@ -14,7 +14,12 @@ import logging
 
 from .intent_classifier import analyze_query_intent, is_ambiguous_leadership_query
 from .retriever import retrieve_candidates
-from .role_filter import rerank_by_generic_role_rules, filter_single_role_candidates
+from .role_filter import (
+    rerank_by_generic_role_rules,
+    filter_single_role_candidates,
+    _is_role_like_query,
+    entity_matches_position,
+)
 from .internet_search import (
     should_search_internet,
     extract_web_sources,
@@ -36,7 +41,7 @@ def _normalise_text(text: str) -> str:
 
 
 def _filter_and_build(
-    results: list, search_mode: str, user_input: str
+    results: list, search_mode: str, user_input: str, entity_only: str = ""
 ) -> tuple:
     """Apply score thresholds and build metadata + context string.
 
@@ -64,7 +69,7 @@ def _filter_and_build(
         from .role_filter import apply_list_query_filters
 
         strictly_valid = [r for r in results if r[3] >= config.MIN_SCORE_THRESHOLD]
-        strictly_valid = apply_list_query_filters(strictly_valid, user_input)
+        strictly_valid = apply_list_query_filters(strictly_valid, user_input, entity_only)
         if not strictly_valid:
             strictly_valid = [
                 r for r in results if r[3] >= highest_score * config.SCORE_RELEVANCE_RATIO
@@ -75,6 +80,19 @@ def _filter_and_build(
             r for r in results if r[3] >= highest_score * config.SCORE_RELEVANCE_RATIO
         ]
         strictly_valid = filter_single_role_candidates(strictly_valid, normalized_query)
+
+        # Phrase-level filter: same logic as LIST mode.
+        # Prevents KNN from elevating "Chủ tịch Hội đồng Dân tộc của Quốc hội"
+        # over "Chủ tịch Quốc hội" when the user searches an exact role phrase.
+        if entity_only:
+            normalized_entity = _normalise_text(entity_only)
+            if _is_role_like_query(normalized_entity):
+                phrase_filtered = [
+                    r for r in strictly_valid
+                    if entity_matches_position(normalized_entity, _normalise_text(r[2]))
+                ]
+                if phrase_filtered:
+                    strictly_valid = phrase_filtered
 
     if not strictly_valid:
         return None, no_match_msg, [] if search_mode == "LIST" else empty_single, [], highest_score
@@ -186,7 +204,62 @@ def process_query(user_input: str, db) -> dict:
         metadata,
         strict_candidates,
         highest_score,
-    ) = _filter_and_build(all_results, search_mode, user_input)
+    ) = _filter_and_build(all_results, search_mode, user_input, entity_only)
+
+    # Ambiguity gate: SINGLE mode with multiple matched candidates.
+    if search_mode == "SINGLE" and len(strict_candidates) > 1:
+        top_score = strict_candidates[0][3]
+        normalized_entity = _normalise_text(entity_only)
+        if _is_role_like_query(normalized_entity):
+            # Role query in SINGLE mode: return all matched holders of that role.
+            rows_list = "\n".join(
+                f"- {r[0]} (sinh {r[1]}): {r[2]}" for r in strict_candidates
+            )
+            return {
+                "intent": intent,
+                "search_mode": search_mode,
+                "metadata": [
+                    {"name": r[0], "nam_sinh": r[1], "chuc_vu": r[2]}
+                    for r in strict_candidates
+                ],
+                "answer_mode": "database_only",
+                "confidence": _estimate_confidence(top_score, "database_only", False),
+                "evidence": {
+                    "db_candidates": _build_db_candidates(strict_candidates),
+                    "web_sources": [],
+                    "retrieval_trace": retrieval_trace,
+                },
+                "answer": (
+                    f"Có {len(strict_candidates)} người đang giữ chức vụ \"{entity_only}\":\n{rows_list}"
+                ),
+            }
+
+        near_top = [
+            r for r in strict_candidates
+            if (top_score - r[3]) / max(top_score, 1) < 0.01
+        ]
+        if len(near_top) > 1:
+            rows_list = "\n".join(
+                f"- {r[0]} (sinh {r[1]}): {r[2]}" for r in near_top
+            )
+            return {
+                "intent": intent,
+                "search_mode": search_mode,
+                "metadata": [
+                    {"name": r[0], "nam_sinh": r[1], "chuc_vu": r[2]} for r in near_top
+                ],
+                "answer_mode": "needs_clarification",
+                "confidence": 0.1,
+                "evidence": {
+                    "db_candidates": _build_db_candidates(near_top),
+                    "web_sources": [],
+                    "retrieval_trace": retrieval_trace,
+                },
+                "answer": (
+                    f"Có {len(near_top)} người có tên \"{entity_only}\" trong dữ liệu. "
+                    f"Bạn vui lòng cho biết thêm thông tin (năm sinh, chức vụ, cơ quan):\n{rows_list}"
+                ),
+            }
 
     # Hard safety gate: never answer from internet/LLM when internal DB has no match.
     # This prevents out-of-domain responses for unrelated public figures.
