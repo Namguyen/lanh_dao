@@ -4,6 +4,7 @@ import csv
 import hashlib
 import logging
 import os
+import re
 from typing import Optional
 
 from elasticsearch import Elasticsearch, helpers
@@ -31,6 +32,16 @@ _ABBREVIATIONS = {
     "TPHCM": "Thành phố Hồ Chí Minh",
     "TP.HCM": "Thành phố Hồ Chí Minh",
 }
+
+# Official-title acronyms that appear in stored position strings but are never
+# typed by users. Stripping them on retrieval keeps the matching layer clean
+# without requiring the matcher to have any acronym-specific knowledge.
+_POSITION_NOISE_RE = re.compile(r'\bCHXHCN(?:VN)?\b', re.IGNORECASE)
+
+
+def _normalise_position(chuc_vu: str) -> str:
+    """Strip noise acronyms from a stored position string."""
+    return ' '.join(_POSITION_NOISE_RE.sub('', chuc_vu).split())
 
 
 class AICandidateDB:
@@ -185,7 +196,7 @@ class AICandidateDB:
         debug_hits = []
         for hit in response["hits"]["hits"]:
             src = hit["_source"]
-            results.append((src["Ten"], src["Nam_Sinh"], src["Chuc_Vu"], hit["_score"]))
+            results.append((src["Ten"], src["Nam_Sinh"], _normalise_position(src["Chuc_Vu"]), hit["_score"]))
 
             if return_debug:
                 debug_hits.append(

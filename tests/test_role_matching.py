@@ -2,9 +2,11 @@ import unittest
 
 from core.role_filter import (
     _extract_core_query_tokens,
+    entity_matches_position,
     filter_single_role_candidates as _filter_single_role_candidates,
 )
 from core.llm_engine import format_direct_answer as _format_direct_answer
+from core.role_filter import _normalise_text as _n
 
 
 class RoleMatchingRegressionTests(unittest.TestCase):
@@ -52,6 +54,24 @@ class RoleMatchingRegressionTests(unittest.TestCase):
 
         self.assertIn("Thu tuong Chinh phu", answer)
         self.assertNotIn("Uy vien Bo Chinh tri.", answer)
+
+    def test_bo_truong_matches_full_official_title_with_bo_prefix(self):
+        # "Bộ trưởng Quốc phòng" must match "Bộ trưởng Bộ Quốc phòng" (structural "Bộ" prefix)
+        self.assertTrue(
+            entity_matches_position(
+                _n("Bo truong Quoc phong"),
+                _n("Uy vien Bo Chinh tri; Dai tuong; Bo truong Bo Quoc phong"),
+            )
+        )
+
+    def test_bo_truong_does_not_match_thu_truong(self):
+        # "Bộ trưởng Quốc phòng" must NOT match "Thứ trưởng Bộ Quốc phòng"
+        self.assertFalse(
+            entity_matches_position(
+                _n("Bo truong Quoc phong"),
+                _n("Thuong tuong, Thu truong Bo Quoc phong"),
+            )
+        )
 
 
 if __name__ == "__main__":

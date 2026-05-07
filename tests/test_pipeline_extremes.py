@@ -119,6 +119,57 @@ class PipelineExtremeCasesTests(unittest.TestCase):
         self.assertLess(result["confidence"], 0.7)
         mocked_generate.assert_called_once()
 
+    def test_single_exact_role_phrase_filters_out_unrelated_bi_thu(self):
+        candidates = [
+            _candidate(
+                "To Lam",
+                1957,
+                "Tong Bi thu, Chu tich nuoc CHXHCN Viet Nam; Bi thu Quan uy Trung uong",
+                807.66,
+            ),
+            _candidate(
+                "Nguyen Huu Nghia",
+                1972,
+                "Uy vien Trung uong Dang; Bi thu Dang uy, Tong Kiem toan nha nuoc",
+                715.18,
+            ),
+        ]
+        mock_db = MockDB(candidates)
+
+        with patch("core.analyze_query_intent", return_value=("DATABASE", "", "SINGLE", "Tong Bi thu")):
+            result = process_query("ai dang giu chuc vu tong bi thu", db=mock_db)
+
+        self.assertEqual(result["search_mode"], "SINGLE")
+        self.assertEqual(result["answer_mode"], "database_only")
+        self.assertIsInstance(result["metadata"], dict)
+        self.assertEqual(result["metadata"]["name"], "To Lam")
+
+    def test_single_chu_tich_nuoc_does_not_match_chu_tich_quoc_hoi(self):
+        """'Chu tich nuoc' must never match 'Chu tich Quoc hoi nuoc' — core bug regression."""
+        candidates = [
+            _candidate(
+                "Tran Thanh Man",
+                1962,
+                "Chu tich Quoc hoi nuoc CHXHCN Viet Nam",
+                820.0,
+            ),
+            _candidate(
+                "To Lam",
+                1957,
+                "Tong Bi thu, Chu tich nuoc CHXHCN Viet Nam; Bi thu Quan uy Trung uong",
+                780.0,
+            ),
+        ]
+        mock_db = MockDB(candidates)
+
+        with patch("core.analyze_query_intent", return_value=("DATABASE", "", "SINGLE", "Chu tich nuoc")):
+            result = process_query("chu tich nuoc la ai", db=mock_db)
+
+        self.assertEqual(result["search_mode"], "SINGLE")
+        self.assertIsInstance(result["metadata"], dict)
+        self.assertEqual(result["metadata"]["name"], "To Lam",
+                         "Chu tich Quoc hoi must NOT match query 'chu tich nuoc'")
+
 
 if __name__ == "__main__":
     unittest.main()

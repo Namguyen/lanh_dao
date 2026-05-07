@@ -1,5 +1,3 @@
-"""FastAPI entry point for the query service."""
-
 import csv
 import functools
 import logging
@@ -24,22 +22,13 @@ import config
 
 log = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Rate limiter
-# ---------------------------------------------------------------------------
 limiter = Limiter(key_func=get_remote_address)
 
-# ---------------------------------------------------------------------------
-# Query cache  (keyed on question text, max 256 entries)
-# ---------------------------------------------------------------------------
 @functools.lru_cache(maxsize=256)
 def _cached_process_query(question: str):
     global db
     return process_query(question, db)
 
-# ---------------------------------------------------------------------------
-# App lifecycle – DB is initialised once at startup, not at import time
-# ---------------------------------------------------------------------------
 db: Optional[AICandidateDB] = None
 
 @asynccontextmanager
@@ -88,6 +77,11 @@ class QueryResponse(BaseModel):
     answer: str
 
 
+class SlimResponse(BaseModel):
+    answer: str
+    metadata: dict | list
+
+
 class QueryVerboseResponse(BaseModel):
     answer: str
     intent: str
@@ -117,28 +111,6 @@ class LookupResponse(BaseModel):
     items: list[LookupCandidate]
 
 
-class GraphNode(BaseModel):
-    id: str
-    label: str
-    kind: str
-    meta: dict = {}
-
-
-class GraphEdge(BaseModel):
-    source: str
-    target: str
-    relation: str
-
-
-class GraphResponse(BaseModel):
-    query: str
-    depth: int
-    node_count: int
-    edge_count: int
-    nodes: list[GraphNode]
-    edges: list[GraphEdge]
-
-
 def _normalize_lookup_text(text: str) -> str:
     """Normalize Vietnamese text for deterministic token matching in lookup."""
     text = unicodedata.normalize("NFD", text.lower())
@@ -152,21 +124,6 @@ def _tokenize_lookup_query(text: str) -> list[str]:
 
 def _split_roles(position: str) -> list[str]:
     return [part.strip() for part in position.split(";") if part.strip()]
-
-
-# Party membership ranks that are shared by almost everyone — not a real functional position
-_GENERIC_PARTY_RANKS: frozenset[str] = frozenset({
-    "Ủy viên Trung ương Đảng",
-    "Ủy viên Bộ Chính trị",
-    "Ủy viên dự khuyết Trung ương Đảng",
-})
-
-
-def _specific_roles(chuc_vu: str) -> list[str]:
-    """Return roles with generic party membership designations removed."""
-    all_roles = _split_roles(chuc_vu)
-    specific = [r for r in all_roles if r not in _GENERIC_PARTY_RANKS]
-    return specific if specific else all_roles
 
 
 def _to_ascii(text: str) -> str:
@@ -286,101 +243,6 @@ def _build_tree_data() -> dict[str, dict[str, dict[str, list[dict[str, Any]]]]]:
     return out
 
 
-@functools.lru_cache(maxsize=1)
-def _build_relationship_graph() -> tuple[dict[str, GraphNode], list[GraphEdge], dict[str, set[str]]]:
-    nodes: dict[str, GraphNode] = {}
-    edges: list[GraphEdge] = []
-    adjacency: dict[str, set[str]] = defaultdict(set)
-
-    def add_node(node_id: str, label: str, kind: str, meta: dict | None = None) -> None:
-        if node_id not in nodes:
-            nodes[node_id] = GraphNode(id=node_id, label=label, kind=kind, meta=meta or {})
-
-    def add_edge(source: str, target: str, relation: str) -> None:
-        edges.append(GraphEdge(source=source, target=target, relation=relation))
-        adjacency[source].add(target)
-        adjacency[target].add(source)
-
-    for row in _load_people_rows():
-        person_id = f"person:{row['name']}"
-        add_node(person_id, row["name"], "person", {"nam_sinh": row["nam_sinh"], "chuc_vu": row["chuc_vu"]})
-
-        roles = _specific_roles(row["chuc_vu"])
-
-        primary_role = roles[0]
-        group_label = _role_group(primary_role)
-        group_id = f"group:{group_label}"
-        add_node(group_id, group_label, "group")
-        add_edge(person_id, group_id, "same_group")
-
-        for role in roles[:3]:
-            role_id = f"role:{role}"
-            add_node(role_id, role, "role")
-            add_edge(person_id, role_id, "holds_role")
-
-            org = _org_bucket(role)
-            org_id = f"org:{org}"
-            add_node(org_id, org, "org")
-            add_edge(role_id, org_id, "belongs_to")
-
-    return nodes, edges, adjacency
-
-
-def _subgraph(query: str, depth: int, max_nodes: int) -> GraphResponse:
-    nodes, edges, adjacency = _build_relationship_graph()
-
-    norm_query = _to_ascii(query)
-    if norm_query:
-        seeds = [
-            node_id
-            for node_id, node in nodes.items()
-            if norm_query in _to_ascii(node.label)
-        ]
-    else:
-        default_keys = {"org:Hà Nội", "group:Nhóm Phó Thủ tướng", "org:Chính phủ"}
-        seeds = [node_id for node_id in nodes if node_id in default_keys]
-
-    if not seeds:
-        return GraphResponse(
-            query=query,
-            depth=depth,
-            node_count=0,
-            edge_count=0,
-            nodes=[],
-            edges=[],
-        )
-
-    keep: set[str] = set()
-    frontier = set(seeds)
-    for _ in range(max(0, depth) + 1):
-        if not frontier:
-            break
-        keep.update(frontier)
-        if len(keep) >= max_nodes:
-            break
-        next_frontier: set[str] = set()
-        for node_id in frontier:
-            next_frontier.update(adjacency.get(node_id, set()))
-        frontier = {n for n in next_frontier if n not in keep}
-
-    if len(keep) > max_nodes:
-        keep = set(list(keep)[:max_nodes])
-
-    selected_nodes = [nodes[node_id] for node_id in keep if node_id in nodes]
-    selected_edges = [
-        edge for edge in edges if edge.source in keep and edge.target in keep
-    ]
-
-    return GraphResponse(
-        query=query,
-        depth=depth,
-        node_count=len(selected_nodes),
-        edge_count=len(selected_edges),
-        nodes=selected_nodes,
-        edges=selected_edges,
-    )
-
-
 @app.get("/health")
 def health():
     """Quick liveness check -- returns db status so callers know if ES is reachable."""
@@ -389,11 +251,11 @@ def health():
 
 @app.post(
     "/search",
-    response_model=QueryResponse | QueryVerboseResponse,
+    response_model=SlimResponse | QueryVerboseResponse,
     responses={500: {"model": ErrorResponse}},
 )
 @limiter.limit("30/minute")
-def search(request: Request, body: QueryRequest, verbose: bool = True):
+def search(request: Request, body: QueryRequest, verbose: bool = False):
     """Accept a natural-language question.
 
     Example request body:
@@ -415,7 +277,7 @@ def search(request: Request, body: QueryRequest, verbose: bool = True):
         raise HTTPException(status_code=500, detail=str(exc))
 
     if not verbose:
-        return QueryResponse(answer=result["answer"])
+        return SlimResponse(answer=result["answer"], metadata=result["metadata"])
 
     elapsed_ms = int((time.time() - start) * 1000)
 
@@ -493,14 +355,3 @@ def lookup(
 def tree() -> dict[str, dict[str, dict[str, list[dict[str, Any]]]]]:
     """Return organization tree used by the frontend tree demo."""
     return _build_tree_data()
-
-
-@app.get("/graph", response_model=GraphResponse)
-def graph(q: str = "", depth: int = 2, max_nodes: int = 120) -> GraphResponse:
-    """Return a relationship graph for demoing leadership connections.
-
-    `q` filters seed nodes (name/role/org/group), then graph expands by hops.
-    """
-    safe_depth = max(0, min(depth, 4))
-    safe_max_nodes = max(20, min(max_nodes, 250))
-    return _subgraph(query=q.strip(), depth=safe_depth, max_nodes=safe_max_nodes)

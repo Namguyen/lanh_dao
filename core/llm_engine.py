@@ -68,6 +68,24 @@ def format_direct_answer(user_input: str, strict_candidates: list, search_mode: 
     return f"{name} (sinh năm {year}) hiện giữ chức vụ: {primary_position}."
 
 
+def format_multi_person_answer(requested_names: list[str], per_entity: dict) -> str:
+    """Format a direct answer for MULTI-person queries without calling the LLM.
+
+    For each requested name, shows the best-matched person's primary position.
+    Entries with no DB match are reported as not found.
+    """
+    lines = []
+    for name in requested_names:
+        hit = per_entity.get(name)
+        if hit is None:
+            lines.append(f"- **{name}**: Không tìm thấy trong dữ liệu nội bộ.")
+        else:
+            hit_name, hit_year, hit_position, hit_score = hit[0], hit[1], hit[2], hit[3]
+            primary = hit_position.split(";")[0].strip()
+            lines.append(f"- **{hit_name}** (sinh {hit_year}): {primary}")
+    return "\n".join(lines)
+
+
 def generate_answer(user_input: str, db_context: str, web_context: str) -> str:
     """Call the LLM to compose a final answer from the provided evidence."""
     now = datetime.now()

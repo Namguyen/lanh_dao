@@ -54,3 +54,33 @@ def retrieve_candidates(db, entities: list[str], search_mode: str) -> tuple[list
     all_results = unique
 
     return all_results, retrieval_trace
+
+
+def retrieve_per_entity(db, entities: list[str]) -> tuple[dict, list]:
+    """For MULTI mode: search each entity individually and return best hit per name.
+
+    Args:
+        db: CandidateDB instance with search method
+        entities: List of specific person names to look up
+
+    Returns:
+        Tuple of (per_entity, retrieval_trace)
+        - per_entity: dict mapping entity name -> best candidate tuple (or None if not found)
+        - retrieval_trace: List of trace info for debugging
+    """
+    per_entity: dict = {}
+    retrieval_trace = []
+
+    for entity in entities:
+        entity = entity.strip()
+        if not entity:
+            continue
+        hits = db.search(entity, limit=config.SINGLE_SEARCH_LIMIT)
+        if hits:
+            per_entity[entity] = hits[0]
+            log.info("MULTI entity '%s': best_score=%.2f → %s", entity, hits[0][3], hits[0][0])
+        else:
+            per_entity[entity] = None
+            log.info("MULTI entity '%s': no hits", entity)
+
+    return per_entity, retrieval_trace

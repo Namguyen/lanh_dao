@@ -5,6 +5,7 @@ based on query modifiers, core token overlap, and role specificity.
 """
 
 import unicodedata
+import re
 
 import config
 
@@ -13,24 +14,42 @@ def _normalise_text(text: str) -> str:
     """Normalize Vietnamese text for robust keyword rule checks."""
     text = unicodedata.normalize("NFD", text.lower())
     text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
+    # Both commas and semicolons separate role segments; normalize both to " ; ".
+    text = re.sub(r"[^\w\s;,]", " ", text)
+    text = re.sub(r"\s*[;,]\s*", " ; ", text)
     return " ".join(text.split())
 
 
 def entity_matches_position(normalized_entity: str, normalized_position: str) -> bool:
     """Return True when a role entity matches a position segment.
 
-    Match policy is anchored subsequence on semicolon-separated segments:
-    - First token of entity must match first token of a segment
-    - Remaining entity tokens must appear in order within that segment
+    Match policy (per semicolon/comma-separated segment):
+    - First token of entity must equal first token of a segment (anchored).
+    - Each subsequent entity token must appear in order; the ONLY tokens allowed
+      between consecutive entity tokens are those from ROLE_MODIFIER_PHRASES.
+      Any other intervening token causes the segment to be rejected.
 
-    This allows inserts like "thuong truc" in
-    "pho thu tuong thuong truc chinh phu" for entity "pho thu tuong chinh phu",
-    while rejecting prefix-subset false matches like
-    entity "chu tich quoc hoi" vs segment "pho chu tich quoc hoi".
+    This correctly matches:
+      entity "pho thu tuong chinh phu" vs segment "pho thu tuong thuong truc chinh phu"
+      ("thuong truc" is a configured modifier, so it may appear between entity tokens)
+
+    And correctly rejects:
+      entity "chu tich nuoc" vs segment "chu tich quoc hoi nuoc chxhcn viet nam"
+      ("quoc hoi" is not a modifier, so the segment is rejected even though "nuoc"
+      appears later — "quoc hoi" fundamentally changes the title meaning)
     """
     entity_tokens = normalized_entity.split()
     if not entity_tokens:
         return False
+
+    modifier_tokens: set[str] = {
+        token
+        for phrase in config.ROLE_MODIFIER_PHRASES
+        for token in phrase.split()
+    }
+    # Structural prefix tokens that appear in full official titles without changing
+    # the role meaning, e.g. "Bộ" in "Bộ trưởng Bộ Quốc phòng" vs query "Bộ trưởng Quốc phòng".
+    _STRUCTURAL: frozenset[str] = frozenset({"bo", "uy", "ban"})
 
     for segment in normalized_position.split(";"):
         seg_tokens = segment.strip().split()
@@ -44,6 +63,11 @@ def entity_matches_position(normalized_entity: str, normalized_position: str) ->
         while ei < len(entity_tokens) and si < len(seg_tokens):
             if seg_tokens[si] == entity_tokens[ei]:
                 ei += 1
+            elif seg_tokens[si] in modifier_tokens or seg_tokens[si] in _STRUCTURAL:
+                pass  # allowed gap token — skip it
+            else:
+                # Meaningful gap token changes the title — reject segment.
+                break
             si += 1
 
         if ei == len(entity_tokens):
@@ -207,27 +231,29 @@ def apply_list_query_filters(results: list, user_input: str, entity_only: str = 
             min_unexpected = min(feat["unexpected_modifiers"] for _, feat in pool)
             filtered = [row for row, feat in pool if feat["unexpected_modifiers"] == min_unexpected]
 
-    # If query targets a specific ministry, keep only candidates whose
-    # positions strongly overlap with that ministry phrase.
+    # If query targets a specific ministry, require ALL ministry-discriminating
+    # tokens (i.e. non-generic-role tokens) to appear in the candidate's position.
+    # This prevents "Thứ trưởng Bộ Quốc phòng" from matching "Thứ trưởng Bộ Ngoại giao".
+    _COMMON_ROLE_TOKENS: frozenset[str] = frozenset({
+        "thu", "truong", "bo", "pho", "uy", "vien",
+        "giam", "doc", "chu", "tich", "tong", "bi", "ban",
+    })
     query_tokens = [
         t for t in normalized_query.split()
         if t not in {"lanh", "dao", "va", "cac", "nhung", "co", "bao", "nhieu", "la", "ai"}
     ]
     if "bo" in query_tokens:
-        target_tokens = [t for t in query_tokens if len(t) > 1]
-        org_filtered = []
-        for row in filtered:
-            pos_tokens = set(_normalise_text(row[2]).split())
-            overlap = sum(1 for token in target_tokens if token in pos_tokens)
-            overlap_ratio = overlap / max(len(target_tokens), 1)
-
-            # Require both the "bo" token and strong overlap to avoid pulling
-            # unrelated ministries into metadata.
-            if "bo" in pos_tokens and overlap_ratio >= 0.6:
-                org_filtered.append(row)
-
-        if org_filtered:
-            filtered = org_filtered
+        ministry_tokens = [
+            t for t in query_tokens
+            if t not in _COMMON_ROLE_TOKENS and len(t) > 1
+        ]
+        if ministry_tokens:
+            org_filtered = [
+                row for row in filtered
+                if all(t in set(_normalise_text(row[2]).split()) for t in ministry_tokens)
+            ]
+            if org_filtered:
+                filtered = org_filtered
 
     # Phrase-level filtering for role entities.
     if entity_only:

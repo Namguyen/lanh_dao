@@ -11,9 +11,10 @@ Returns structured response with metadata, confidence, and evidence.
 """
 
 import logging
+import re
 
 from .intent_classifier import analyze_query_intent, is_ambiguous_leadership_query
-from .retriever import retrieve_candidates
+from .retriever import retrieve_candidates, retrieve_per_entity
 from .role_filter import (
     rerank_by_generic_role_rules,
     filter_single_role_candidates,
@@ -25,7 +26,7 @@ from .internet_search import (
     extract_web_sources,
     generate_evidence_first_news_answer,
 )
-from .llm_engine import format_direct_answer, generate_answer
+from .llm_engine import format_direct_answer, format_multi_person_answer, generate_answer
 import config
 
 log = logging.getLogger(__name__)
@@ -37,6 +38,9 @@ def _normalise_text(text: str) -> str:
 
     text = unicodedata.normalize("NFD", text.lower())
     text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
+    # Both commas and semicolons separate role segments; normalize both to " ; ".
+    text = re.sub(r"[^\w\s;,]", " ", text)
+    text = re.sub(r"\s*[;,]\s*", " ; ", text)
     return " ".join(text.split())
 
 
@@ -194,6 +198,42 @@ def process_query(user_input: str, db) -> dict:
         }
 
     # Stage 2: Database retrieval
+    # ── MULTI mode: look up each person individually ──────────────────────────
+    if search_mode == "MULTI":
+        entity_names = [e.strip() for e in entity_only.split(",") if e.strip()]
+        per_entity, retrieval_trace = retrieve_per_entity(db, entity_names)
+
+        # Build metadata list and collect all found candidates for evidence
+        metadata = []
+        all_found = []
+        for name in entity_names:
+            hit = per_entity.get(name)
+            if hit and hit[3] >= config.MIN_SCORE_THRESHOLD:
+                metadata.append({"name": hit[0], "nam_sinh": hit[1], "chuc_vu": hit[2]})
+                all_found.append(hit)
+            else:
+                # Below threshold — treat as not found
+                per_entity[name] = None
+
+        answer = format_multi_person_answer(entity_names, per_entity)
+        highest_score = max((h[3] for h in all_found), default=0.0)
+        confidence = _estimate_confidence(highest_score, "database_only", False) if all_found else 0.1
+
+        return {
+            "intent": intent,
+            "search_mode": search_mode,
+            "metadata": metadata,
+            "answer_mode": "database_only" if all_found else "no_match",
+            "confidence": confidence,
+            "evidence": {
+                "db_candidates": _build_db_candidates(all_found),
+                "web_sources": [],
+                "retrieval_trace": retrieval_trace,
+            },
+            "answer": answer,
+        }
+
+    # ─────────────────────────────────────────────────────────────────────────
     entities = [e.strip() for e in entity_only.split(",")]
     all_results, retrieval_trace = retrieve_candidates(db, entities, search_mode)
 
