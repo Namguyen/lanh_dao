@@ -18,6 +18,7 @@ from .retriever import retrieve_candidates, retrieve_per_entity
 from .role_filter import (
     rerank_by_generic_role_rules,
     filter_single_role_candidates,
+    filter_by_name_overlap,
     _is_role_like_query,
     entity_matches_position,
 )
@@ -245,6 +246,15 @@ def process_query(user_input: str, db) -> dict:
         strict_candidates,
         highest_score,
     ) = _filter_and_build(all_results, search_mode, user_input, entity_only)
+
+    # Stage 3b: Name-overlap guard (person-name queries only).
+    if search_mode == "SINGLE" and best_person is not None and not _is_role_like_query(_normalise_text(entity_only)):
+        name_matched = filter_by_name_overlap(strict_candidates, entity_only)
+        if not name_matched:
+            log.info("Name-overlap guard: no match for '%s'", entity_only)
+            best_person = None
+            strict_candidates = []
+            metadata = {"name": None, "nam_sinh": None, "chuc_vu": None}
 
     # Ambiguity gate: SINGLE mode with multiple matched candidates.
     if search_mode == "SINGLE" and len(strict_candidates) > 1:

@@ -198,6 +198,37 @@ def filter_single_role_candidates(candidates: list, normalized_query: str) -> li
     return filtered if filtered else candidates
 
 
+# Common Vietnamese surnames/middle-name tokens that alone cannot identify a specific
+# person. Used by filter_by_name_overlap() to require at least one discriminating token
+# from the queried name to appear in a candidate's actual name.
+_COMMON_VN_NAME_TOKENS: frozenset[str] = frozenset({
+    "nguyen", "tran", "le", "pham", "hoang", "huynh",
+    "phan", "vu", "vo", "dang", "bui", "do", "ho", "ngo",
+    "duong", "ly", "van", "thi",
+})
+
+
+def filter_by_name_overlap(candidates: list, entity_only: str) -> list:
+    """For SINGLE person-name queries, discard candidates whose name shares no
+    discriminating token with the queried name.
+
+    Prevents KNN position-vector matches from surfacing unrelated people when
+    the queried person is absent from the DB (e.g. historical figures, fake names).
+    Returns the filtered list, or an empty list when no candidate passes.
+    """
+    if not candidates or not entity_only:
+        return candidates
+
+    all_name_tokens = {t for t in _normalise_text(entity_only).split() if len(t) >= 3}
+    discriminating = all_name_tokens - _COMMON_VN_NAME_TOKENS
+    check_tokens = discriminating if discriminating else all_name_tokens
+
+    return [
+        r for r in candidates
+        if check_tokens & set(_normalise_text(r[0]).split())
+    ]
+
+
 def apply_list_query_filters(results: list, user_input: str, entity_only: str = "") -> list:
     """Apply precise filters for list/count queries to avoid undercounting.
 
