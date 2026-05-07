@@ -220,6 +220,44 @@ class AICandidateDB:
 
         return results, debug_payload
 
+    def search_text(self, user_input, limit=20):
+        """Run pure lexical full-text search (BM25) without vector scoring.
+
+        Useful for high-recall role/list queries where strict token coverage in
+        `Chuc_Vu` is more important than semantic similarity.
+        """
+        query_text = self._normalise(user_input)
+
+        body = {
+            "size": limit,
+            "query": {
+                "bool": {
+                    "should": [
+                        {
+                            "multi_match": {
+                                "query": query_text,
+                                "fields": ["Ten^3", "Chuc_Vu^2"],
+                                "type": "cross_fields",
+                                "operator": "and",
+                            }
+                        },
+                        {"match_phrase": {"Chuc_Vu": {"query": query_text, "boost": 3}}},
+                        {"match_phrase": {"Ten": {"query": query_text, "boost": 5}}},
+                    ],
+                    "minimum_should_match": 1,
+                }
+            },
+        }
+
+        response = self.es.search(index=self.index_name, body=body)
+
+        results = []
+        for hit in response["hits"]["hits"]:
+            src = hit["_source"]
+            results.append((src["Ten"], src["Nam_Sinh"], _normalise_position(src["Chuc_Vu"]), hit["_score"]))
+
+        return results
+
     @staticmethod
     def _normalise(text):
         for abbr, full in _ABBREVIATIONS.items():

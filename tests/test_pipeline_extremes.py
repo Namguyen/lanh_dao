@@ -65,20 +65,9 @@ class PipelineExtremeCasesTests(unittest.TestCase):
         mock_db = MockDB(candidates)
 
         with patch("core.analyze_query_intent", return_value=("DATABASE", "", "SINGLE", "Thu tuong")), \
-             patch("core.internet_search.generate_evidence_first_news_answer", return_value="news-summary"):
-            # Mock internet search at the orchestrator level
-            import core.orchestrator as orch
-            original_should_search = orch.should_search_internet
-            
-            def mock_should_search(intent, user_input):
-                return True
-            
-            orch.should_search_internet = mock_should_search
-            
-            try:
-                result = process_query("thủ tướng mới nhất", db=mock_db)
-            finally:
-                orch.should_search_internet = original_should_search
+             patch("core.orchestrator.should_search_internet", return_value=True), \
+             patch("core.orchestrator.generate_evidence_first_news_answer", return_value="news-summary"):
+            result = process_query("thủ tướng mới nhất", db=mock_db)
 
         self.assertEqual(result["answer"], "news-summary")
         self.assertEqual(result["answer_mode"], "db_plus_web")
@@ -111,7 +100,7 @@ class PipelineExtremeCasesTests(unittest.TestCase):
         mock_db = MockDB(candidates)
 
         with patch("core.analyze_query_intent", return_value=("DATABASE", "", "SINGLE", "Thu tuong")), \
-             patch("core.llm_engine.generate_answer", return_value="llm-fallback") as mocked_generate:
+             patch("core.orchestrator.generate_answer", return_value="llm-fallback") as mocked_generate:
             result = process_query("thu tuong la ai", db=mock_db)
 
         self.assertEqual(result["answer"], "llm-fallback")
@@ -169,6 +158,55 @@ class PipelineExtremeCasesTests(unittest.TestCase):
         self.assertIsInstance(result["metadata"], dict)
         self.assertEqual(result["metadata"]["name"], "To Lam",
                          "Chu tich Quoc hoi must NOT match query 'chu tich nuoc'")
+
+    def test_list_thu_truong_bo_cong_an_keeps_all_matching_role_holders(self):
+        """List role queries should evaluate modifiers on the matched role segment only."""
+        candidates = [
+            _candidate(
+                "Dang Hong Duc",
+                1977,
+                "Uy vien Trung uong Dang; Uy vien Ban Thuong vu Dang uy Cong an Trung uong; Trung tuong, Thu truong Bo Cong an",
+                1030.0,
+            ),
+            _candidate(
+                "Le Quoc Hung",
+                1966,
+                "Uy vien Trung uong Dang; Pho Bi thu Dang uy Cong an Trung uong; Thuong tuong, Thu truong Bo Cong an",
+                990.0,
+            ),
+            _candidate(
+                "Nguyen Ngoc Lam",
+                1973,
+                "Uy vien Trung uong Dang; Uy vien Ban Thuong vu Dang uy Cong an Trung uong; Thuong tuong, Thu truong Bo Cong an",
+                1005.0,
+            ),
+            _candidate(
+                "Nguyen Van Long",
+                1974,
+                "Uy vien Trung uong Dang; Uy vien Ban Thuong vu Dang uy Cong an Trung uong; Thuong tuong, Thu truong Bo Cong an",
+                1001.0,
+            ),
+            _candidate(
+                "Pham The Tung",
+                1972,
+                "Uy vien Trung uong Dang; Uy vien Ban Thuong vu Dang uy Cong an Trung uong; Thuong tuong, Thu truong Bo Cong an",
+                998.0,
+            ),
+            _candidate(
+                "Le Van Tuyen",
+                1973,
+                "Uy vien Trung uong Dang; Uy vien Ban Thuong vu Dang uy Cong an Trung uong; Thuong tuong, Thu truong Bo Cong an",
+                997.0,
+            ),
+        ]
+        mock_db = MockDB(candidates)
+
+        with patch("core.analyze_query_intent", return_value=("DATABASE", "", "LIST", "Thu truong Bo Cong an")):
+            result = process_query("co bao nhieu thu truong bo cong an", db=mock_db)
+
+        self.assertEqual(result["search_mode"], "LIST")
+        self.assertEqual(len(result["metadata"]), 6)
+        self.assertIn("Le Quoc Hung", {row["name"] for row in result["metadata"]})
 
 
 if __name__ == "__main__":

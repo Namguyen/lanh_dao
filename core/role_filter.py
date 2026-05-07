@@ -4,20 +4,17 @@ This module applies generic role-alignment rules to filter and rerank candidates
 based on query modifiers, core token overlap, and role specificity.
 """
 
-import unicodedata
-import re
-
 import config
+import re
+from .text_utils import normalize_role_text, role_modifier_tokens
 
 
 def _normalise_text(text: str) -> str:
     """Normalize Vietnamese text for robust keyword rule checks."""
-    text = unicodedata.normalize("NFD", text.lower())
-    text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
-    # Both commas and semicolons separate role segments; normalize both to " ; ".
-    text = re.sub(r"[^\w\s;,]", " ", text)
-    text = re.sub(r"\s*[;,]\s*", " ; ", text)
-    return " ".join(text.split())
+    normalized = normalize_role_text(text)
+    # Common city abbreviation used in user queries.
+    normalized = re.sub(r"\btp\s*hcm\b|\btphcm\b", "thanh pho ho chi minh", normalized)
+    return " ".join(normalized.split())
 
 
 def entity_matches_position(normalized_entity: str, normalized_position: str) -> bool:
@@ -42,14 +39,10 @@ def entity_matches_position(normalized_entity: str, normalized_position: str) ->
     if not entity_tokens:
         return False
 
-    modifier_tokens: set[str] = {
-        token
-        for phrase in config.ROLE_MODIFIER_PHRASES
-        for token in phrase.split()
-    }
+    modifier_tokens = role_modifier_tokens()
     # Structural prefix tokens that appear in full official titles without changing
     # the role meaning, e.g. "Bộ" in "Bộ trưởng Bộ Quốc phòng" vs query "Bộ trưởng Quốc phòng".
-    _STRUCTURAL: frozenset[str] = frozenset({"bo", "uy", "ban"})
+    _STRUCTURAL = config.ROLE_STRUCTURAL_GAP_TOKENS
 
     for segment in normalized_position.split(";"):
         seg_tokens = segment.strip().split()
@@ -89,6 +82,10 @@ def _extract_modifier_phrases(normalized_text: str) -> set[str]:
 
         for i in range(len(text_tokens) - n + 1):
             if text_tokens[i : i + n] == phrase_tokens:
+                # "pho" is a role modifier in titles like "pho bi thu",
+                # but in geographic names "thanh pho" it is not a modifier.
+                if phrase == "pho" and i > 0 and text_tokens[i - 1] == "thanh":
+                    continue
                 found.add(phrase)
                 break
 
@@ -97,11 +94,7 @@ def _extract_modifier_phrases(normalized_text: str) -> set[str]:
 
 def _extract_core_query_tokens(normalized_query: str) -> list[str]:
     """Extract role-defining tokens by removing filler and modifier tokens."""
-    modifier_tokens = {
-        token
-        for phrase in config.ROLE_MODIFIER_PHRASES
-        for token in phrase.split()
-    }
+    modifier_tokens = role_modifier_tokens()
     return [
         t
         for t in normalized_query.split()
@@ -118,23 +111,48 @@ def _candidate_role_features(candidate: tuple, normalized_query: str) -> dict:
     """Compute role-alignment features for one candidate tuple."""
     position_norm = _normalise_text(candidate[2])
     query_modifiers = _extract_modifier_phrases(normalized_query)
-    candidate_modifiers = _extract_modifier_phrases(position_norm)
     core_tokens = _extract_core_query_tokens(normalized_query)
 
-    overlap = sum(1 for token in core_tokens if token in position_norm)
-    core_overlap_ratio = overlap / max(len(core_tokens), 1)
+    segments = [seg.strip() for seg in position_norm.split(";") if seg.strip()]
+    if not segments:
+        segments = [position_norm]
 
-    missing_required = len(query_modifiers - candidate_modifiers)
-    # If query does not ask for a modifier, prefer cleaner primary roles.
-    unexpected_modifiers = len(candidate_modifiers - query_modifiers)
+    segment_features = []
+    for seg in segments:
+        seg_modifiers = _extract_modifier_phrases(seg)
+        overlap = sum(1 for token in core_tokens if token in seg)
+        core_overlap_ratio = overlap / max(len(core_tokens), 1)
+        missing_required = len(query_modifiers - seg_modifiers)
+        # If query does not ask for a modifier, prefer cleaner primary roles.
+        unexpected_modifiers = len(seg_modifiers - query_modifiers)
+        segment_features.append(
+            {
+                "segment": seg,
+                "candidate_modifiers": seg_modifiers,
+                "core_overlap_ratio": core_overlap_ratio,
+                "missing_required": missing_required,
+                "unexpected_modifiers": unexpected_modifiers,
+            }
+        )
+
+    # Score the segment that best reflects the queried role, then use its
+    # alignment features for candidate-level filtering/ranking.
+    best = min(
+        segment_features,
+        key=lambda feat: (
+            feat["missing_required"],
+            -feat["core_overlap_ratio"],
+            feat["unexpected_modifiers"],
+        ),
+    )
 
     return {
         "position_norm": position_norm,
         "query_modifiers": query_modifiers,
-        "candidate_modifiers": candidate_modifiers,
-        "core_overlap_ratio": core_overlap_ratio,
-        "missing_required": missing_required,
-        "unexpected_modifiers": unexpected_modifiers,
+        "candidate_modifiers": best["candidate_modifiers"],
+        "core_overlap_ratio": best["core_overlap_ratio"],
+        "missing_required": best["missing_required"],
+        "unexpected_modifiers": best["unexpected_modifiers"],
     }
 
 
@@ -265,18 +283,14 @@ def apply_list_query_filters(results: list, user_input: str, entity_only: str = 
     # If query targets a specific ministry, require ALL ministry-discriminating
     # tokens (i.e. non-generic-role tokens) to appear in the candidate's position.
     # This prevents "Thứ trưởng Bộ Quốc phòng" from matching "Thứ trưởng Bộ Ngoại giao".
-    _COMMON_ROLE_TOKENS: frozenset[str] = frozenset({
-        "thu", "truong", "bo", "pho", "uy", "vien",
-        "giam", "doc", "chu", "tich", "tong", "bi", "ban",
-    })
     query_tokens = [
         t for t in normalized_query.split()
-        if t not in {"lanh", "dao", "va", "cac", "nhung", "co", "bao", "nhieu", "la", "ai"}
+        if t not in config.LIST_QUERY_FILLER_TOKENS
     ]
     if "bo" in query_tokens:
         ministry_tokens = [
             t for t in query_tokens
-            if t not in _COMMON_ROLE_TOKENS and len(t) > 1
+            if t not in config.COMMON_ROLE_TOKENS and len(t) > 1
         ]
         if ministry_tokens:
             org_filtered = [

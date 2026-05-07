@@ -4,7 +4,6 @@ import logging
 import os
 import re
 import time
-import unicodedata
 from contextlib import asynccontextmanager
 from collections import defaultdict
 from typing import Any, Optional
@@ -17,6 +16,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 from core import process_query
+from core.text_utils import normalize_text, to_ascii_text, tokenize_normalized
 from es import AICandidateDB
 import config
 
@@ -113,13 +113,11 @@ class LookupResponse(BaseModel):
 
 def _normalize_lookup_text(text: str) -> str:
     """Normalize Vietnamese text for deterministic token matching in lookup."""
-    text = unicodedata.normalize("NFD", text.lower())
-    text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
-    return " ".join(text.split())
+    return normalize_text(text)
 
 
 def _tokenize_lookup_query(text: str) -> list[str]:
-    return [t for t in _normalize_lookup_text(text).split() if len(t) >= 2]
+    return tokenize_normalized(text, min_len=2)
 
 
 def _split_roles(position: str) -> list[str]:
@@ -127,9 +125,7 @@ def _split_roles(position: str) -> list[str]:
 
 
 def _to_ascii(text: str) -> str:
-    text = unicodedata.normalize("NFD", text.lower())
-    text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
-    return " ".join(text.replace("đ", "d").split())
+    return to_ascii_text(text)
 
 
 def _branch_of_role(role_text: str) -> str:
@@ -255,7 +251,7 @@ def health():
     responses={500: {"model": ErrorResponse}},
 )
 @limiter.limit("30/minute")
-def search(request: Request, body: QueryRequest, verbose: bool = False):
+def search(request: Request, body: QueryRequest, verbose: bool = True):
     """Accept a natural-language question.
 
     Example request body:

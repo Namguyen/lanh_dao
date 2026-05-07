@@ -34,6 +34,25 @@ def retrieve_candidates(db, entities: list[str], search_mode: str) -> tuple[list
     for entity in entities:
         hits = db.search(entity, limit=limit)
 
+        # For LIST/group queries, merge in pure full-text matches to improve
+        # recall without relying on manual score tuning or prefix rules.
+        if search_mode == "LIST" and hasattr(db, "search_text"):
+            try:
+                text_hits = db.search_text(entity, limit=max(limit * 2, limit))
+            except Exception:
+                text_hits = []
+
+            if text_hits:
+                merged = {}
+                for row in hits + text_hits:
+                    key = (row[0], row[1], row[2])
+                    prev = merged.get(key)
+                    if prev is None or float(row[3]) > float(prev[3]):
+                        merged[key] = row
+                hits = list(merged.values())
+                hits.sort(key=lambda r: r[3], reverse=True)
+                hits = hits[: max(limit * 2, limit)]
+
         if not hits:
             continue
 

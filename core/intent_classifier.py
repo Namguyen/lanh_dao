@@ -14,6 +14,7 @@ import logging
 from openai import OpenAI
 
 import config
+from .text_utils import normalize_text
 
 log = logging.getLogger(__name__)
 
@@ -100,15 +101,8 @@ Trả về JSON gồm 4 trường: intent, rewritten_query, search_mode, entity_
 
 def is_ambiguous_leadership_query(user_input: str, entity_only: str) -> bool:
     """Return True when query is too generic to safely pick a single person."""
-    import unicodedata
-
-    def _normalise_text(text: str) -> str:
-        text = unicodedata.normalize("NFD", text.lower())
-        text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
-        return " ".join(text.split())
-
-    normalized_query = _normalise_text(user_input)
-    normalized_entity = _normalise_text(str(entity_only or ""))
+    normalized_query = normalize_text(user_input)
+    normalized_entity = normalize_text(str(entity_only or ""))
 
     has_generic = any(phrase in normalized_query for phrase in config.GENERIC_ENTITY_PHRASES)
     has_specific = any(hint in normalized_query for hint in config.SPECIFIC_ROLE_HINTS)
@@ -128,7 +122,7 @@ def is_ambiguous_leadership_query(user_input: str, entity_only: str) -> bool:
     non_generic_tokens = [
         t
         for t in meaningful_tokens
-        if t not in {"lanh", "dao", "can", "bo", "nhan", "su", "sep", "nguoi", "dung", "dau"}
+        if t not in config.COMMON_GENERIC_ENTITY_TOKENS
     ]
     generic_only_question = has_generic and not non_generic_tokens
 

@@ -5,12 +5,12 @@ including direct formatting for high-confidence DB-only results.
 """
 
 import logging
-import unicodedata
 from datetime import datetime
 
 from openai import OpenAI
 
 import config
+from .text_utils import normalize_text, role_modifier_tokens
 
 log = logging.getLogger(__name__)
 
@@ -19,18 +19,12 @@ _llm = OpenAI(api_key=config.DEEPSEEK_API_KEY, base_url=config.DEEPSEEK_BASE_URL
 
 def _normalise_text(text: str) -> str:
     """Normalize Vietnamese text for robust keyword rule checks."""
-    text = unicodedata.normalize("NFD", text.lower())
-    text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
-    return " ".join(text.split())
+    return normalize_text(text)
 
 
 def _extract_core_query_tokens(normalized_query: str) -> list[str]:
     """Extract role-defining tokens by removing filler and modifier tokens."""
-    modifier_tokens = {
-        token
-        for phrase in config.ROLE_MODIFIER_PHRASES
-        for token in phrase.split()
-    }
+    modifier_tokens = role_modifier_tokens()
     return [
         t
         for t in normalized_query.split()

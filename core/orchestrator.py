@@ -11,7 +11,7 @@ Returns structured response with metadata, confidence, and evidence.
 """
 
 import logging
-import re
+import time
 
 from .intent_classifier import analyze_query_intent, is_ambiguous_leadership_query
 from .retriever import retrieve_candidates, retrieve_per_entity
@@ -22,6 +22,7 @@ from .role_filter import (
     _is_role_like_query,
     entity_matches_position,
 )
+from .text_utils import normalize_role_text
 from .internet_search import (
     should_search_internet,
     extract_web_sources,
@@ -35,14 +36,7 @@ log = logging.getLogger(__name__)
 
 def _normalise_text(text: str) -> str:
     """Normalize Vietnamese text for robust keyword rule checks."""
-    import unicodedata
-
-    text = unicodedata.normalize("NFD", text.lower())
-    text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
-    # Both commas and semicolons separate role segments; normalize both to " ; ".
-    text = re.sub(r"[^\w\s;,]", " ", text)
-    text = re.sub(r"\s*[;,]\s*", " ; ", text)
-    return " ".join(text.split())
+    return normalize_role_text(text)
 
 
 def _filter_and_build(
@@ -173,8 +167,18 @@ def process_query(user_input: str, db) -> dict:
         - evidence: dict with db_candidates, web_sources, retrieval_trace
         - answer: Final answer string
     """
+    timings_ms: dict[str, int] = {
+        "intent": 0,
+        "retrieval": 0,
+        "filter": 0,
+        "internet": 0,
+        "answer": 0,
+    }
+
     # Stage 1: Intent analysis
+    t0 = time.perf_counter()
     intent, _rewritten, search_mode, entity_only = analyze_query_intent(user_input)
+    timings_ms["intent"] = int((time.perf_counter() - t0) * 1000)
     log.info("Intent=%s  mode=%s  entity='%s'", intent, search_mode, entity_only)
 
     if is_ambiguous_leadership_query(user_input, entity_only):
@@ -194,6 +198,7 @@ def process_query(user_input: str, db) -> dict:
                 "db_candidates": [],
                 "web_sources": [],
                 "retrieval_trace": [],
+                "timings_ms": timings_ms,
             },
             "answer": clarify_answer,
         }
@@ -201,8 +206,10 @@ def process_query(user_input: str, db) -> dict:
     # Stage 2: Database retrieval
     # ── MULTI mode: look up each person individually ──────────────────────────
     if search_mode == "MULTI":
+        t0 = time.perf_counter()
         entity_names = [e.strip() for e in entity_only.split(",") if e.strip()]
         per_entity, retrieval_trace = retrieve_per_entity(db, entity_names)
+        timings_ms["retrieval"] = int((time.perf_counter() - t0) * 1000)
 
         # Build metadata list and collect all found candidates for evidence
         metadata = []
@@ -216,7 +223,9 @@ def process_query(user_input: str, db) -> dict:
                 # Below threshold — treat as not found
                 per_entity[name] = None
 
+        t0 = time.perf_counter()
         answer = format_multi_person_answer(entity_names, per_entity)
+        timings_ms["answer"] = int((time.perf_counter() - t0) * 1000)
         highest_score = max((h[3] for h in all_found), default=0.0)
         confidence = _estimate_confidence(highest_score, "database_only", False) if all_found else 0.1
 
@@ -230,15 +239,19 @@ def process_query(user_input: str, db) -> dict:
                 "db_candidates": _build_db_candidates(all_found),
                 "web_sources": [],
                 "retrieval_trace": retrieval_trace,
+                "timings_ms": timings_ms,
             },
             "answer": answer,
         }
 
     # ─────────────────────────────────────────────────────────────────────────
+    t0 = time.perf_counter()
     entities = [e.strip() for e in entity_only.split(",")]
     all_results, retrieval_trace = retrieve_candidates(db, entities, search_mode)
+    timings_ms["retrieval"] = int((time.perf_counter() - t0) * 1000)
 
     # Stage 3: Score filtering and metadata
+    t0 = time.perf_counter()
     (
         best_person,
         db_context,
@@ -246,6 +259,7 @@ def process_query(user_input: str, db) -> dict:
         strict_candidates,
         highest_score,
     ) = _filter_and_build(all_results, search_mode, user_input, entity_only)
+    timings_ms["filter"] = int((time.perf_counter() - t0) * 1000)
 
     # Stage 3b: Name-overlap guard (person-name queries only).
     if search_mode == "SINGLE" and best_person is not None and not _is_role_like_query(_normalise_text(entity_only)):
@@ -278,6 +292,7 @@ def process_query(user_input: str, db) -> dict:
                     "db_candidates": _build_db_candidates(strict_candidates),
                     "web_sources": [],
                     "retrieval_trace": retrieval_trace,
+                    "timings_ms": timings_ms,
                 },
                 "answer": (
                     f"Có {len(strict_candidates)} người đang giữ chức vụ \"{entity_only}\":\n{rows_list}"
@@ -304,6 +319,7 @@ def process_query(user_input: str, db) -> dict:
                     "db_candidates": _build_db_candidates(near_top),
                     "web_sources": [],
                     "retrieval_trace": retrieval_trace,
+                    "timings_ms": timings_ms,
                 },
                 "answer": (
                     f"Có {len(near_top)} người có tên \"{entity_only}\" trong dữ liệu. "
@@ -330,6 +346,7 @@ def process_query(user_input: str, db) -> dict:
                 "db_candidates": [],
                 "web_sources": [],
                 "retrieval_trace": retrieval_trace,
+                "timings_ms": timings_ms,
             },
             "answer": answer,
         }
@@ -337,12 +354,14 @@ def process_query(user_input: str, db) -> dict:
     # Stage 4: Optional internet enrichment
     # LIST queries (counting/listing groups) don't benefit from per-person news digests
     web_context = ""
+    t0 = time.perf_counter()
     if search_mode != "LIST" and should_search_internet(intent, user_input):
         from ai_service import get_internet_info
 
         search_query = best_person[0]
         log.info("Internet search: %s", search_query)
         web_context = get_internet_info(search_query, person_name=best_person[0])
+    timings_ms["internet"] = int((time.perf_counter() - t0) * 1000)
 
     web_sources = extract_web_sources(web_context)
     answer_mode = "db_plus_web" if web_sources else "database_only"
@@ -351,6 +370,7 @@ def process_query(user_input: str, db) -> dict:
     # Stage 5: Answer generation
     is_news_query = any(kw in user_input.lower() for kw in config.NEWS_KEYWORDS)
 
+    t0 = time.perf_counter()
     if is_news_query:
         position = best_person[2].split(";")[0].strip()
         answer = generate_evidence_first_news_answer(best_person[0], position, web_context)
@@ -359,6 +379,7 @@ def process_query(user_input: str, db) -> dict:
         answer = format_direct_answer(user_input, strict_candidates, search_mode)
     else:
         answer = generate_answer(user_input, db_context, web_context)
+    timings_ms["answer"] = int((time.perf_counter() - t0) * 1000)
 
     return {
         "intent": intent,
@@ -370,6 +391,7 @@ def process_query(user_input: str, db) -> dict:
             "db_candidates": _build_db_candidates(strict_candidates),
             "web_sources": web_sources,
             "retrieval_trace": retrieval_trace,
+            "timings_ms": timings_ms,
         },
         "answer": answer,
     }

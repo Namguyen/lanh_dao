@@ -3,26 +3,24 @@
 import json
 import logging
 import re
-import unicodedata
 from urllib.parse import urlparse
 
 import requests
 
 import config
+from core.text_utils import normalize_text
 
 log = logging.getLogger(__name__)
 
 
 def _normalise_text(text):
     """Normalize Vietnamese text for robust matching."""
-    text = unicodedata.normalize("NFD", text.lower())
-    text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
-    return " ".join(text.split())
+    return normalize_text(text)
 
 
 def _extract_name_tokens(person_name):
     tokens = [t for t in _normalise_text(person_name).split() if len(t) > 1]
-    return [t for t in tokens if t not in {"thi", "van"}]
+    return [t for t in tokens if t not in config.PERSON_NAME_LIGHT_STOPWORDS]
 
 
 def _is_result_relevant_to_person(result, person_name):

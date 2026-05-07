@@ -153,6 +153,7 @@ SPECIFIC_ROLE_HINTS: Final[set[str]] = {
     "bo ngoai giao",
     "quoc hoi",
     "chinh phu",
+    "uy vien",
 }
 
 GENERIC_QUERY_FILLER_TOKENS: Final[set[str]] = {
@@ -181,6 +182,24 @@ ROLE_QUERY_FILLER_TOKENS: Final[set[str]] = GENERIC_QUERY_FILLER_TOKENS | {
     "co", "the", "cho", "biet",
     "dang", "lam", "hien", "nay", "giu", "chuc", "dung", "dau", "duoc",
 }
+
+# Shared lexical/token constants (avoid hardcoded inline sets across modules)
+COMMON_ROLE_TOKENS: Final[frozenset[str]] = frozenset({
+    "thu", "truong", "bo", "pho", "uy", "vien",
+    "giam", "doc", "chu", "tich", "tong", "bi", "ban",
+})
+
+LIST_QUERY_FILLER_TOKENS: Final[frozenset[str]] = frozenset({
+    "lanh", "dao", "va", "cac", "nhung", "co", "bao", "nhieu", "la", "ai",
+})
+
+COMMON_GENERIC_ENTITY_TOKENS: Final[frozenset[str]] = frozenset({
+    "lanh", "dao", "can", "bo", "nhan", "su", "sep", "nguoi", "dung", "dau",
+})
+
+PERSON_NAME_LIGHT_STOPWORDS: Final[frozenset[str]] = frozenset({"thi", "van"})
+
+ROLE_STRUCTURAL_GAP_TOKENS: Final[frozenset[str]] = frozenset({"bo", "uy", "ban"})
 
 ROLE_MISSING_MODIFIER_PENALTY: Final[float] = 25.0
 ROLE_EXTRA_MODIFIER_PENALTY: Final[float] = 8.0

@@ -4,6 +4,7 @@ from core.role_filter import (
     _extract_core_query_tokens,
     entity_matches_position,
     filter_single_role_candidates as _filter_single_role_candidates,
+    apply_list_query_filters,
 )
 from core.llm_engine import format_direct_answer as _format_direct_answer
 from core.role_filter import _normalise_text as _n
@@ -72,6 +73,64 @@ class RoleMatchingRegressionTests(unittest.TestCase):
                 _n("Thuong tuong, Thu truong Bo Quoc phong"),
             )
         )
+
+    def test_list_bi_thu_thanh_uy_keeps_thanh_pho_case(self):
+        candidates = [
+            (
+                "Tran Luu Quang",
+                1967,
+                "Uy vien Bo Chinh tri; Bi thu Thanh uy Thanh pho Ho Chi Minh",
+                1000.0,
+            ),
+            (
+                "Le Ngoc Chau",
+                1972,
+                "Uy vien Trung uong Dang; Bi thu Thanh uy Hai Phong",
+                980.0,
+            ),
+            (
+                "Le Quoc Phong",
+                1978,
+                "Uy vien Trung uong Dang; Pho Bi thu Thuong truc Thanh uy Thanh pho Ho Chi Minh",
+                970.0,
+            ),
+        ]
+
+        filtered = apply_list_query_filters(
+            candidates,
+            user_input="bi thu thanh uy",
+            entity_only="bi thu thanh uy",
+        )
+
+        names = {r[0] for r in filtered}
+        self.assertIn("Tran Luu Quang", names)
+        self.assertIn("Le Ngoc Chau", names)
+        self.assertNotIn("Le Quoc Phong", names)
+
+    def test_list_bi_thu_thanh_uy_tphcm_maps_to_full_city_name(self):
+        candidates = [
+            (
+                "Tran Luu Quang",
+                1967,
+                "Uy vien Bo Chinh tri; Bi thu Thanh uy Thanh pho Ho Chi Minh",
+                1000.0,
+            ),
+            (
+                "Le Ngoc Chau",
+                1972,
+                "Uy vien Trung uong Dang; Bi thu Thanh uy Hai Phong",
+                980.0,
+            ),
+        ]
+
+        filtered = apply_list_query_filters(
+            candidates,
+            user_input="bi thu thanh uy tphcm",
+            entity_only="bi thu thanh uy tphcm",
+        )
+
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0][0], "Tran Luu Quang")
 
 
 if __name__ == "__main__":
