@@ -12,6 +12,7 @@ from openai import OpenAI
 
 from ai_service import get_internet_info
 import config
+import constants
 
 log = logging.getLogger(__name__)
 
@@ -22,7 +23,7 @@ def should_search_internet(intent: str, user_input: str) -> bool:
     """Determine whether an internet search is warranted."""
     if intent == "INTERNET":
         return True
-    return any(kw in user_input.lower() for kw in config.NEWS_KEYWORDS)
+    return any(kw in user_input.lower() for kw in constants.NEWS_KEYWORDS)
 
 
 def extract_web_sources(web_context: str) -> list[dict]:

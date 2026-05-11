@@ -10,26 +10,10 @@ from datetime import datetime
 from openai import OpenAI
 
 import config
-from .text_utils import normalize_text, role_modifier_tokens
 
 log = logging.getLogger(__name__)
 
 _llm = OpenAI(api_key=config.DEEPSEEK_API_KEY, base_url=config.DEEPSEEK_BASE_URL)
-
-
-def _normalise_text(text: str) -> str:
-    """Normalize Vietnamese text for robust keyword rule checks."""
-    return normalize_text(text)
-
-
-def _extract_core_query_tokens(normalized_query: str) -> list[str]:
-    """Extract role-defining tokens by removing filler and modifier tokens."""
-    modifier_tokens = role_modifier_tokens()
-    return [
-        t
-        for t in normalized_query.split()
-        if t not in config.ROLE_QUERY_FILLER_TOKENS and t not in modifier_tokens and len(t) > 1
-    ]
 
 
 def format_direct_answer(user_input: str, strict_candidates: list, search_mode: str) -> str:
@@ -45,21 +29,10 @@ def format_direct_answer(user_input: str, strict_candidates: list, search_mode: 
     person = strict_candidates[0]
     name, year, position = person[0], person[1], person[2]
     segments = [s.strip() for s in position.split(";") if s.strip()]
-    query_tokens = _extract_core_query_tokens(_normalise_text(user_input))
-
-    # Prefer the role segment that best overlaps with query intent
-    # (e.g. "thủ tướng" over generic labels like "ủy viên").
-    best_segment = segments[0] if segments else position
-    best_score = -1
-    for seg in segments:
-        seg_norm = _normalise_text(seg)
-        score = sum(1 for t in query_tokens if t in seg_norm)
-        if score > best_score:
-            best_score = score
-            best_segment = seg
-
-    primary_position = best_segment
-    return f"{name} (sinh năm {year}) hiện giữ chức vụ: {primary_position}."
+    if len(segments) == 1:
+        return f"{name} (sinh năm {year}) hiện giữ chức vụ: {segments[0]}."
+    positions = "\n".join(f"  - {s}" for s in segments)
+    return f"{name} (sinh năm {year}) hiện giữ các chức vụ:\n{positions}"
 
 
 def format_multi_person_answer(requested_names: list[str], per_entity: dict) -> str:
@@ -75,8 +48,8 @@ def format_multi_person_answer(requested_names: list[str], per_entity: dict) -> 
             lines.append(f"- **{name}**: Không tìm thấy trong dữ liệu nội bộ.")
         else:
             hit_name, hit_year, hit_position, hit_score = hit[0], hit[1], hit[2], hit[3]
-            primary = hit_position.split(";")[0].strip()
-            lines.append(f"- **{hit_name}** (sinh {hit_year}): {primary}")
+            positions = "; ".join(s.strip() for s in hit_position.split(";") if s.strip())
+            lines.append(f"- **{hit_name}** (sinh {hit_year}): {positions}")
     return "\n".join(lines)
 
 

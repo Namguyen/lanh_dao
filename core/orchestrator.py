@@ -29,7 +29,7 @@ from .internet_search import (
     generate_evidence_first_news_answer,
 )
 from .llm_engine import format_direct_answer, format_multi_person_answer, generate_answer
-import config
+import constants
 
 log = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ def _filter_and_build(
     results = rerank_by_generic_role_rules(results, user_input)
 
     highest_score = results[0][3]
-    if highest_score <= config.MIN_SCORE_THRESHOLD:
+    if highest_score <= constants.MIN_SCORE_THRESHOLD:
         log.info("Top score %.2f below threshold; returning empty metadata", highest_score)
         return None, no_match_msg, [] if search_mode == "LIST" else empty_single, [], highest_score
 
@@ -67,31 +67,31 @@ def _filter_and_build(
         # aggressive top-ratio filtering that can hide valid entries.
         from .role_filter import apply_list_query_filters
 
-        strictly_valid = [r for r in results if r[3] >= config.MIN_SCORE_THRESHOLD]
+        strictly_valid = [r for r in results if r[3] >= constants.MIN_SCORE_THRESHOLD]
         strictly_valid = apply_list_query_filters(strictly_valid, user_input, entity_only)
         if not strictly_valid:
             strictly_valid = [
-                r for r in results if r[3] >= highest_score * config.SCORE_RELEVANCE_RATIO
+                r for r in results if r[3] >= highest_score * constants.SCORE_RELEVANCE_RATIO
             ]
     else:
         normalized_query = _normalise_text(user_input)
         strictly_valid = [
-            r for r in results if r[3] >= highest_score * config.SCORE_RELEVANCE_RATIO
+            r for r in results if r[3] >= highest_score * constants.SCORE_RELEVANCE_RATIO
         ]
         strictly_valid = filter_single_role_candidates(strictly_valid, normalized_query)
 
-        # Phrase-level filter: same logic as LIST mode.
-        # Prevents KNN from elevating "Chủ tịch Hội đồng Dân tộc của Quốc hội"
-        # over "Chủ tịch Quốc hội" when the user searches an exact role phrase.
-        if entity_only:
-            normalized_entity = _normalise_text(entity_only)
-            if _is_role_like_query(normalized_entity):
-                phrase_filtered = [
-                    r for r in strictly_valid
-                    if entity_matches_position(normalized_entity, _normalise_text(r[2]))
-                ]
-                if phrase_filtered:
-                    strictly_valid = phrase_filtered
+        # Phrase-level filter: use entity_only when available, else fall back to
+        # normalized_query. This catches false positives where two roles share the
+        # same modifier (e.g. "Phó Chủ tịch Thường trực Hội đồng Dân tộc" vs
+        # "Phó Chủ tịch Thường trực Quốc hội").
+        _phrase_source = _normalise_text(entity_only) if entity_only else normalized_query
+        if _is_role_like_query(_phrase_source):
+            phrase_filtered = [
+                r for r in strictly_valid
+                if entity_matches_position(_phrase_source, _normalise_text(r[2]))
+            ]
+            if phrase_filtered:
+                strictly_valid = phrase_filtered
 
     if not strictly_valid:
         return None, no_match_msg, [] if search_mode == "LIST" else empty_single, [], highest_score
@@ -103,7 +103,7 @@ def _filter_and_build(
     if search_mode == "LIST":
         metadata = [
             {"name": r[0], "nam_sinh": r[1], "chuc_vu": r[2]}
-            for r in strictly_valid[: config.LIST_METADATA_CAP]
+            for r in strictly_valid[: constants.LIST_METADATA_CAP]
         ]
     else:
         metadata = {
@@ -137,7 +137,7 @@ def _estimate_confidence(
     if answer_mode == "no_match":
         return 0.0
 
-    base = min(1.0, highest_score / max(config.MIN_SCORE_THRESHOLD * 2, 1))
+    base = min(1.0, highest_score / max(constants.MIN_SCORE_THRESHOLD * 2, 1))
 
     if answer_mode == "database_only":
         base *= 0.9
@@ -203,6 +203,23 @@ def process_query(user_input: str, db) -> dict:
             "answer": clarify_answer,
         }
 
+    if intent == "OUT_OF_SCOPE":
+        empty_meta = {"name": None, "nam_sinh": None, "chuc_vu": None}
+        return {
+            "intent": intent,
+            "search_mode": search_mode,
+            "metadata": [] if search_mode == "LIST" else empty_meta,
+            "answer_mode": "no_match",
+            "confidence": 0.0,
+            "evidence": {
+                "db_candidates": [],
+                "web_sources": [],
+                "retrieval_trace": [],
+                "timings_ms": timings_ms,
+            },
+            "answer": "Không có thông tin về nhân sự.",
+        }
+
     # Stage 2: Database retrieval
     # ── MULTI mode: look up each person individually ──────────────────────────
     if search_mode == "MULTI":
@@ -216,7 +233,7 @@ def process_query(user_input: str, db) -> dict:
         all_found = []
         for name in entity_names:
             hit = per_entity.get(name)
-            if hit and hit[3] >= config.MIN_SCORE_THRESHOLD:
+            if hit and hit[3] >= constants.MIN_SCORE_THRESHOLD:
                 metadata.append({"name": hit[0], "nam_sinh": hit[1], "chuc_vu": hit[2]})
                 all_found.append(hit)
             else:
@@ -368,11 +385,11 @@ def process_query(user_input: str, db) -> dict:
     confidence = _estimate_confidence(highest_score, answer_mode, bool(web_sources))
 
     # Stage 5: Answer generation
-    is_news_query = any(kw in user_input.lower() for kw in config.NEWS_KEYWORDS)
+    is_news_query = any(kw in user_input.lower() for kw in constants.NEWS_KEYWORDS)
 
     t0 = time.perf_counter()
     if is_news_query:
-        position = best_person[2].split(";")[0].strip()
+        position = "; ".join(s.strip() for s in best_person[2].split(";") if s.strip())
         answer = generate_evidence_first_news_answer(best_person[0], position, web_context)
     elif answer_mode == "database_only" and confidence >= 0.7:
         # High-confidence pure DB result → skip LLM, format directly (~1-3s saved)

@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-import config
+import constants
 from core import process_query
 
 
@@ -50,7 +50,7 @@ class PipelineExtremeCasesTests(unittest.TestCase):
             result = process_query("liet ke thu truong", db=mock_db)
 
         self.assertEqual(result["search_mode"], "LIST")
-        self.assertLessEqual(len(result["metadata"]), config.LIST_METADATA_CAP)
+        self.assertLessEqual(len(result["metadata"]), constants.LIST_METADATA_CAP)
         self.assertIn("Danh sách tìm được", result["answer"])
 
     def test_happy_news_query_uses_news_synthesis(self):

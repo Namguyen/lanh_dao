@@ -8,7 +8,7 @@ import functools
 import re
 import unicodedata
 
-import config
+import constants
 
 
 @functools.lru_cache(maxsize=1)
@@ -16,7 +16,7 @@ def role_modifier_tokens() -> frozenset[str]:
     """Return flattened modifier tokens derived from configured phrases."""
     return frozenset(
         token
-        for phrase in config.ROLE_MODIFIER_PHRASES
+        for phrase in constants.ROLE_MODIFIER_PHRASES
         for token in phrase.split()
     )
 

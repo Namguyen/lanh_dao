@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 import requests
 
 import config
+import constants
 from core.text_utils import normalize_text
 
 log = logging.getLogger(__name__)
@@ -20,7 +21,7 @@ def _normalise_text(text):
 
 def _extract_name_tokens(person_name):
     tokens = [t for t in _normalise_text(person_name).split() if len(t) > 1]
-    return [t for t in tokens if t not in config.PERSON_NAME_LIGHT_STOPWORDS]
+    return [t for t in tokens if t not in constants.PERSON_NAME_LIGHT_STOPWORDS]
 
 
 def _is_result_relevant_to_person(result, person_name):
@@ -62,15 +63,15 @@ def _extract_domain(url):
 
 
 def _is_official_domain(domain):
-    return any(domain == d or domain.endswith(f".{d}") for d in config.OFFICIAL_NEWS_DOMAINS)
+    return any(domain == d or domain.endswith(f".{d}") for d in constants.OFFICIAL_NEWS_DOMAINS)
 
 
 def _is_deprioritized_domain(domain):
-    return any(domain == d or domain.endswith(f".{d}") for d in config.DEPRIORITIZED_NEWS_DOMAINS)
+    return any(domain == d or domain.endswith(f".{d}") for d in constants.DEPRIORITIZED_NEWS_DOMAINS)
 
 
 def _is_blocked_domain(domain):
-    return any(domain == d or domain.endswith(f".{d}") for d in config.BLOCKED_NEWS_DOMAINS)
+    return any(domain == d or domain.endswith(f".{d}") for d in constants.BLOCKED_NEWS_DOMAINS)
 
 
 def _result_priority_tuple(result):
@@ -81,8 +82,6 @@ def _result_priority_tuple(result):
         0 if _is_deprioritized_domain(domain) else 1,
     )
 
-
-# --------------- Title-based deduplication ---------------
 
 _TITLE_STOP_WORDS = {
     "dong", "chi", "ong", "ba", "va", "cua", "tai", "voi", "trong", "ngoai",

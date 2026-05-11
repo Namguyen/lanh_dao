@@ -4,7 +4,7 @@ This module applies generic role-alignment rules to filter and rerank candidates
 based on query modifiers, core token overlap, and role specificity.
 """
 
-import config
+import constants
 import re
 from .text_utils import normalize_role_text, role_modifier_tokens
 
@@ -42,7 +42,7 @@ def entity_matches_position(normalized_entity: str, normalized_position: str) ->
     modifier_tokens = role_modifier_tokens()
     # Structural prefix tokens that appear in full official titles without changing
     # the role meaning, e.g. "Bộ" in "Bộ trưởng Bộ Quốc phòng" vs query "Bộ trưởng Quốc phòng".
-    _STRUCTURAL = config.ROLE_STRUCTURAL_GAP_TOKENS
+    _STRUCTURAL = constants.ROLE_STRUCTURAL_GAP_TOKENS
 
     for segment in normalized_position.split(";"):
         seg_tokens = segment.strip().split()
@@ -74,7 +74,7 @@ def _extract_modifier_phrases(normalized_text: str) -> set[str]:
     text_tokens = normalized_text.split()
     found: set[str] = set()
 
-    for phrase in config.ROLE_MODIFIER_PHRASES:
+    for phrase in constants.ROLE_MODIFIER_PHRASES:
         phrase_tokens = phrase.split()
         n = len(phrase_tokens)
         if not n:
@@ -98,13 +98,13 @@ def _extract_core_query_tokens(normalized_query: str) -> list[str]:
     return [
         t
         for t in normalized_query.split()
-        if t not in config.ROLE_QUERY_FILLER_TOKENS and t not in modifier_tokens and len(t) > 1
+        if t not in constants.ROLE_QUERY_FILLER_TOKENS and t not in modifier_tokens and len(t) > 1
     ]
 
 
 def _is_role_like_query(normalized_query: str) -> bool:
     """Return True when query appears to target a role/title rather than a person name."""
-    return any(hint in normalized_query for hint in config.SPECIFIC_ROLE_HINTS)
+    return any(hint in normalized_query for hint in constants.SPECIFIC_ROLE_HINTS)
 
 
 def _candidate_role_features(candidate: tuple, normalized_query: str) -> dict:
@@ -120,7 +120,8 @@ def _candidate_role_features(candidate: tuple, normalized_query: str) -> dict:
     segment_features = []
     for seg in segments:
         seg_modifiers = _extract_modifier_phrases(seg)
-        overlap = sum(1 for token in core_tokens if token in seg)
+        seg_words = set(seg.split())
+        overlap = sum(1 for token in core_tokens if token in seg_words)
         core_overlap_ratio = overlap / max(len(core_tokens), 1)
         missing_required = len(query_modifiers - seg_modifiers)
         # If query does not ask for a modifier, prefer cleaner primary roles.
@@ -183,9 +184,9 @@ def _rerank_by_generic_role_rules_impl(results: list, user_input: str) -> list:
         # then unexpected modifiers, while preserving original retrieval score.
         adjusted = (
             raw_score
-            + features["core_overlap_ratio"] * config.ROLE_CORE_OVERLAP_WEIGHT
-            - features["missing_required"] * config.ROLE_MISSING_MODIFIER_PENALTY
-            - features["unexpected_modifiers"] * config.ROLE_EXTRA_MODIFIER_PENALTY
+            + features["core_overlap_ratio"] * constants.ROLE_CORE_OVERLAP_WEIGHT
+            - features["missing_required"] * constants.ROLE_MISSING_MODIFIER_PENALTY
+            - features["unexpected_modifiers"] * constants.ROLE_EXTRA_MODIFIER_PENALTY
         )
         scored.append((adjusted, row))
 
@@ -206,7 +207,7 @@ def filter_single_role_candidates(candidates: list, normalized_query: str) -> li
     eligible = [
         (row, feat)
         for row, feat in decorated
-        if feat["missing_required"] == 0 and feat["core_overlap_ratio"] >= config.ROLE_MIN_CORE_OVERLAP
+        if feat["missing_required"] == 0 and feat["core_overlap_ratio"] >= constants.ROLE_MIN_CORE_OVERLAP
     ]
     pool = eligible if eligible else decorated
 
@@ -217,7 +218,7 @@ def filter_single_role_candidates(candidates: list, normalized_query: str) -> li
 
 
 # Common Vietnamese surnames/middle-name tokens that alone cannot identify a specific
-# person. Used by filter_by_name_overlap() to require at least one discriminating token
+# . personUsed by filter_by_name_overlap() to require at least one discriminating token
 # from the queried name to appear in a candidate's actual name.
 _COMMON_VN_NAME_TOKENS: frozenset[str] = frozenset({
     "nguyen", "tran", "le", "pham", "hoang", "huynh",
@@ -247,15 +248,21 @@ def filter_by_name_overlap(candidates: list, entity_only: str) -> list:
     ]
 
 
-def apply_list_query_filters(results: list, user_input: str, entity_only: str = "") -> list:
-    """Apply precise filters for list/count queries to avoid undercounting.
+def _dedupe_identity_rows(rows: list) -> list:
+    """Deduplicate identity tuples while preserving ranking order."""
+    deduped = []
+    seen = set()
+    for row in rows:
+        key = (row[0], row[1], row[2])
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(row)
+    return deduped
 
-    Use generic role alignment so LIST mode does not rely on title-specific rules.
-    """
-    if not results:
-        return results
 
-    normalized_query = _normalise_text(user_input)
+def _apply_single_list_query_filter(results: list, normalized_query: str) -> list:
+    """Apply LIST filtering for one normalized role query/entity phrase."""
     filtered = results
 
     if _is_role_like_query(normalized_query):
@@ -267,7 +274,7 @@ def apply_list_query_filters(results: list, user_input: str, entity_only: str = 
         role_aligned = [
             (row, feat)
             for row, feat in decorated
-            if feat["missing_required"] == 0 and feat["core_overlap_ratio"] >= config.ROLE_MIN_CORE_OVERLAP
+            if feat["missing_required"] == 0 and feat["core_overlap_ratio"] >= constants.ROLE_MIN_CORE_OVERLAP
         ]
         pool = role_aligned if role_aligned else decorated
 
@@ -285,12 +292,12 @@ def apply_list_query_filters(results: list, user_input: str, entity_only: str = 
     # This prevents "Thứ trưởng Bộ Quốc phòng" from matching "Thứ trưởng Bộ Ngoại giao".
     query_tokens = [
         t for t in normalized_query.split()
-        if t not in config.LIST_QUERY_FILLER_TOKENS
+        if t not in constants.LIST_QUERY_FILLER_TOKENS
     ]
     if "bo" in query_tokens:
         ministry_tokens = [
             t for t in query_tokens
-            if t not in config.COMMON_ROLE_TOKENS and len(t) > 1
+            if t not in constants.COMMON_ROLE_TOKENS and len(t) > 1
         ]
         if ministry_tokens:
             org_filtered = [
@@ -300,24 +307,40 @@ def apply_list_query_filters(results: list, user_input: str, entity_only: str = 
             if org_filtered:
                 filtered = org_filtered
 
-    # Phrase-level filtering for role entities.
-    if entity_only:
-        normalized_entity = _normalise_text(entity_only)
-        if _is_role_like_query(normalized_entity):
-            phrase_filtered = [
-                row for row in filtered
-                if entity_matches_position(normalized_entity, _normalise_text(row[2]))
-            ]
-            if phrase_filtered:
-                filtered = phrase_filtered
+    if _is_role_like_query(normalized_query):
+        phrase_filtered = [
+            row for row in filtered
+            if entity_matches_position(normalized_query, _normalise_text(row[2]))
+        ]
+        if phrase_filtered:
+            filtered = phrase_filtered
 
-    # Deduplicate by full identity tuple while preserving ranking order.
-    deduped = []
-    seen = set()
-    for row in filtered:
-        key = (row[0], row[1], row[2])
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(row)
-    return deduped
+    return _dedupe_identity_rows(filtered)
+
+
+def apply_list_query_filters(results: list, user_input: str, entity_only: str = "") -> list:
+    """Apply precise filters for list/count queries to avoid undercounting.
+
+    Use generic role alignment so LIST mode does not rely on title-specific rules.
+    """
+    if not results:
+        return results
+
+    normalized_query = _normalise_text(user_input)
+    role_entities = []
+    if entity_only:
+        role_entities = [
+            normalized_part
+            for normalized_part in (_normalise_text(part) for part in entity_only.split(","))
+            if normalized_part and _is_role_like_query(normalized_part)
+        ]
+
+    if len(role_entities) > 1:
+        merged = []
+        for role_entity in role_entities:
+            merged.extend(_apply_single_list_query_filter(results, role_entity))
+        if merged:
+            return _dedupe_identity_rows(merged)
+
+    filter_query = role_entities[0] if role_entities else normalized_query
+    return _apply_single_list_query_filter(results, filter_query)

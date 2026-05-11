@@ -9,8 +9,8 @@ from typing import Optional
 
 from elasticsearch import Elasticsearch, helpers
 from sentence_transformers import SentenceTransformer
-
 import config
+import constants
 
 log = logging.getLogger(__name__)
 
@@ -148,14 +148,14 @@ class AICandidateDB:
                 "field": "vector_chuc_vu",
                 "query_vector": query_vector,
                 "k": limit,
-                "num_candidates": config.KNN_NUM_CANDIDATES,
+                "num_candidates": constants.KNN_NUM_CANDIDATES,
                 "boost": 3.0,
             },
             "query": {
                 "bool": {
                     "should": [
                         {"match_phrase": {"Ten": {"query": query_text, "boost": 100}}},
-                        {"match_phrase": {"Chuc_Vu": {"query": query_text, "boost": 5}}},
+                        {"match_phrase": {"Chuc_Vu": {"query": query_text, "boost": 5, "slop": 2}}},
                         {
                             "multi_match": {
                                 "query": query_text,

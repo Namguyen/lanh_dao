@@ -14,6 +14,7 @@ import logging
 from openai import OpenAI
 
 import config
+import constants
 from .text_utils import normalize_text
 
 log = logging.getLogger(__name__)
@@ -37,6 +38,7 @@ QUY TẮC CHẾ ĐỘ TÌM KIẾM (search_mode):
 QUY TẮC Ý ĐỊNH (intent):
 - "DATABASE": Hỏi người, chức vụ nội bộ.
 - "INTERNET": Hỏi sự kiện thời sự, người từ trần.
+- "OUT_OF_SCOPE": Hỏi về nhân sự của một khóa/nhiệm kỳ trong QUÁ KHỨ rõ ràng không còn đương nhiệm (VD: "phó thủ tướng khóa XII", "bộ trưởng nhiệm kỳ 2016-2021", "tổng bí thư khóa XI"). Database CHỈ có dữ liệu nhân sự HIỆN TẠI (trung ương đảng khóa XIV, Quốc hội khóa XVI).
 
 QUY TẮC VIẾT LẠI (rewritten_query):
 1. Xóa đại từ xưng hô (VD: "sếp", "lãnh đạo")
@@ -64,6 +66,10 @@ QUY TẮC entity_only:
   - Ví dụ: "chủ tịch nước tô lâm" → entity_only = "Tô Lâm"
   - Ví dụ: "bộ trưởng quốc phòng phan văn giang" → entity_only = "Phan Văn Giang"
   - Ngược lại: "tổng bí thư là ai" → entity_only = "Tổng Bí thư" (không có tên người cụ thể)
+- Xóa HOÀN TOÀN cụm "khóa [số/số La Mã]" và "nhiệm kỳ [số/năm]" khỏi entity_only. Database không phân biệt theo khóa/nhiệm kỳ.
+  - Ví dụ: "phó thủ tướng khóa XIV" → entity_only = "Phó Thủ tướng"
+  - Ví dụ: "đại biểu quốc hội khóa XVI" → entity_only = "Đại biểu Quốc hội"
+  - Ví dụ: "bộ trưởng nhiệm kỳ 2021-2026" → entity_only = "Bộ trưởng"
 - Ví dụ: "Thủ tướng chỉ đạo mới" -> "Thủ tướng"
 - Ví dụ: "Bí thư thủ đô là ai" -> "Bí thư Hà Nội"
 - Ví dụ: "đức thắng viettel làm gì" -> "Đức Thắng Viettel"
@@ -104,10 +110,10 @@ def is_ambiguous_leadership_query(user_input: str, entity_only: str) -> bool:
     normalized_query = normalize_text(user_input)
     normalized_entity = normalize_text(str(entity_only or ""))
 
-    has_generic = any(phrase in normalized_query for phrase in config.GENERIC_ENTITY_PHRASES)
-    has_specific = any(hint in normalized_query for hint in config.SPECIFIC_ROLE_HINTS)
+    has_generic = any(phrase in normalized_query for phrase in constants.GENERIC_ENTITY_PHRASES)
+    has_specific = any(hint in normalized_query for hint in constants.SPECIFIC_ROLE_HINTS)
     entity_is_generic = (
-        normalized_entity in config.GENERIC_ENTITY_PHRASES
+        normalized_entity in constants.GENERIC_ENTITY_PHRASES
         or normalized_entity.replace(" ", "") in {"lanhdao", "canbo", "nhansu", "sep"}
     )
 
@@ -118,11 +124,11 @@ def is_ambiguous_leadership_query(user_input: str, entity_only: str) -> bool:
     entity_matches_whole_query = normalized_entity == normalized_query
 
     query_tokens = normalized_query.split()
-    meaningful_tokens = [t for t in query_tokens if t not in config.GENERIC_QUERY_FILLER_TOKENS]
+    meaningful_tokens = [t for t in query_tokens if t not in constants.GENERIC_QUERY_FILLER_TOKENS]
     non_generic_tokens = [
         t
         for t in meaningful_tokens
-        if t not in config.COMMON_GENERIC_ENTITY_TOKENS
+        if t not in constants.COMMON_GENERIC_ENTITY_TOKENS
     ]
     generic_only_question = has_generic and not non_generic_tokens
 

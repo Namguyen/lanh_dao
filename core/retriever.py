@@ -6,7 +6,7 @@ based on extracted entities from the intent classification stage.
 
 import logging
 
-import config
+import constants
 
 log = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ def retrieve_candidates(db, entities: list[str], search_mode: str) -> tuple[list
         - all_results: List of candidate tuples sorted by score
         - retrieval_trace: List of trace info for debugging
     """
-    limit = config.LIST_SEARCH_LIMIT if search_mode == "LIST" else config.SINGLE_SEARCH_LIMIT
+    limit = constants.LIST_SEARCH_LIMIT if search_mode == "LIST" else constants.SINGLE_SEARCH_LIMIT
 
     all_results = []
     retrieval_trace = []
@@ -94,7 +94,7 @@ def retrieve_per_entity(db, entities: list[str]) -> tuple[dict, list]:
         entity = entity.strip()
         if not entity:
             continue
-        hits = db.search(entity, limit=config.SINGLE_SEARCH_LIMIT)
+        hits = db.search(entity, limit=constants.SINGLE_SEARCH_LIMIT)
         if hits:
             per_entity[entity] = hits[0]
             log.info("MULTI entity '%s': best_score=%.2f → %s", entity, hits[0][3], hits[0][0])
