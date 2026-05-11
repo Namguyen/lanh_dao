@@ -2,9 +2,7 @@
 
 from typing import Final
 
-# ---------------------------------------------------------------------------
 # News domain filtering
-# ---------------------------------------------------------------------------
 OFFICIAL_NEWS_DOMAINS: Final[set[str]] = {
     "chinhphu.vn",
     "baochinhphu.vn",
@@ -24,8 +22,6 @@ OFFICIAL_NEWS_DOMAINS: Final[set[str]] = {
     "thanhnien.vn",
     "vnexpress.net",
 }
-
-DEPRIORITIZED_NEWS_DOMAINS: Final[set[str]] = set()
 
 BLOCKED_NEWS_DOMAINS: Final[set[str]] = {
     # Social media
@@ -57,9 +53,7 @@ BLOCKED_NEWS_DOMAINS: Final[set[str]] = {
     "nguoiquansat.vn",
 }
 
-# ---------------------------------------------------------------------------
 # Search parameters
-# ---------------------------------------------------------------------------
 SINGLE_SEARCH_LIMIT: Final[int] = 12
 LIST_SEARCH_LIMIT: Final[int] = 20
 SCORE_RELEVANCE_RATIO: Final[float] = 0.85
@@ -67,17 +61,15 @@ MIN_SCORE_THRESHOLD: Final[float] = 5.0
 LIST_METADATA_CAP: Final[int] = 20
 KNN_NUM_CANDIDATES: Final[int] = 20
 
-# ---------------------------------------------------------------------------
+
 # Internet trigger keywords
-# ---------------------------------------------------------------------------
+
 NEWS_KEYWORDS: Final[list[str]] = [
     "chỉ đạo", "hoạt động", "mới nhất", "mới", "gần đây",
     "tin tức", "phát biểu", "gặp gỡ", "tiếp đón", "thăm", "ký kết",
 ]
 
-# ---------------------------------------------------------------------------
 # Role matching configuration
-# ---------------------------------------------------------------------------
 SPECIFIC_ROLE_HINTS: Final[frozenset[str]] = frozenset({
     "bo truong",
     "thu truong",
@@ -144,7 +136,6 @@ GENERIC_PARTY_LABELS: Final[frozenset[str]] = frozenset({
     "uy vien bo chinh tri",
     "uy vien trung uong dang",
     "uy vien du khuyet trung uong dang",
-    "bi thu trung uong dang",
 })
 
 ROLE_STRUCTURAL_GAP_TOKENS: Final[frozenset[str]] = frozenset({"bo", "uy", "ban"})

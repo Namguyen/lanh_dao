@@ -66,10 +66,6 @@ def _is_official_domain(domain):
     return any(domain == d or domain.endswith(f".{d}") for d in constants.OFFICIAL_NEWS_DOMAINS)
 
 
-def _is_deprioritized_domain(domain):
-    return any(domain == d or domain.endswith(f".{d}") for d in constants.DEPRIORITIZED_NEWS_DOMAINS)
-
-
 def _is_blocked_domain(domain):
     return any(domain == d or domain.endswith(f".{d}") for d in constants.BLOCKED_NEWS_DOMAINS)
 
@@ -79,7 +75,6 @@ def _result_priority_tuple(result):
     return (
         1 if _is_official_domain(domain) else 0,
         1 if _has_concrete_time_hint(result) else 0,
-        0 if _is_deprioritized_domain(domain) else 1,
     )
 
 

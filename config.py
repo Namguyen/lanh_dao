@@ -1,5 +1,3 @@
-"""Centralized configuration loaded from environment variables with validation."""
-
 import os
 import logging
 from typing import Final
@@ -37,4 +35,24 @@ SERPER_URL: Final[str] = "https://google.serper.dev/search"
 SERPER_NEWS_URL: Final[str] = "https://google.serper.dev/news"
 SERPER_TIMEOUT_SECONDS: Final[int] = 10
 SERPER_MAX_RESULTS: Final[int] = 3
+
+
+def validate_config() -> bool:
+    errors = []
+
+    if not DEEPSEEK_API_KEY:
+        errors.append("DEEPSEEK_API_KEY is required but not set")
+
+    if not ES_PASS:
+        log.warning("ES_PASS is empty (insecure for production)")
+
+    if not SERPER_API_KEY:
+        log.warning("SERPER_API_KEY is not set (internet search disabled)")
+
+    if errors:
+        for error in errors:
+            log.error(error)
+        return False
+
+    return True
 
