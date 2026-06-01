@@ -231,7 +231,7 @@ def filter_by_name_overlap(candidates: list, entity_only: str) -> list:
     """For SINGLE person-name queries, discard candidates whose name shares no
     discriminating token with the queried name.
 
-    Prevents KNN position-vector matches from surfacing unrelated people when
+    Prevents broad text matches from surfacing unrelated people when
     the queried person is absent from the DB (e.g. historical figures, fake names).
     Returns the filtered list, or an empty list when no candidate passes.
     """

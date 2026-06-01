@@ -59,7 +59,6 @@ LIST_SEARCH_LIMIT: Final[int] = 20
 SCORE_RELEVANCE_RATIO: Final[float] = 0.85
 MIN_SCORE_THRESHOLD: Final[float] = 5.0
 LIST_METADATA_CAP: Final[int] = 20
-KNN_NUM_CANDIDATES: Final[int] = 20
 
 
 # Internet trigger keywords

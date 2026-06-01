@@ -2,15 +2,9 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install dependencies first (cached layer). The API runs on CPU, so avoid
-# pulling PyTorch's multi-gigabyte CUDA dependency set.
+# Install dependencies first (cached layer)
 COPY requirements.txt .
-RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch \
-    && pip install --no-cache-dir -r requirements.txt
-
-# Pre-download the sentence-transformers model so it's baked into the image
-# and doesn't need to download at runtime on the server
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('AITeamVN/Vietnamese_Embedding')"
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy source code
 COPY . .

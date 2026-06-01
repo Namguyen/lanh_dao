@@ -1,31 +1,14 @@
-"""Elasticsearch-backed candidate database with hybrid lexical + vector search."""
+"""Elasticsearch-backed candidate database with lexical search."""
 
 import csv
 import hashlib
 import logging
 import os
 import re
-from typing import Optional
-
 from elasticsearch import Elasticsearch, helpers
-from sentence_transformers import SentenceTransformer
 import config
-import constants
 
 log = logging.getLogger(__name__)
-
-_model: Optional[SentenceTransformer] = None
-_VECTOR_DIMS: int = 0
-
-
-def _get_model() -> SentenceTransformer:
-    """Lazy-load the embedding model to avoid import-time side effects."""
-    global _model, _VECTOR_DIMS
-    if _model is None:
-        _model = SentenceTransformer("AITeamVN/Vietnamese_Embedding")
-        _VECTOR_DIMS = _model.get_sentence_embedding_dimension()
-    return _model
-
 
 # Abbreviation mappings applied before every search query
 _ABBREVIATIONS = {
@@ -54,16 +37,10 @@ class AICandidateDB:
             verify_certs=verify_certs,
         )
         self.index_name = config.ES_INDEX
-        self._model = _get_model()
 
         self._ensure_index()
         if not self._has_data():
             self.sync_from_csv("data - danh_sach.csv")
-
-    @property
-    def model(self) -> SentenceTransformer:
-        """Return the embedding model instance."""
-        return self._model
 
     def _ensure_index(self):
         """Create the index with explicit field mapping if it does not exist."""
@@ -76,17 +53,11 @@ class AICandidateDB:
                     "Ten": {"type": "text", "analyzer": "standard"},
                     "Nam_Sinh": {"type": "integer"},
                     "Chuc_Vu": {"type": "text", "analyzer": "standard"},
-                    "vector_chuc_vu": {
-                        "type": "dense_vector",
-                        "dims": _VECTOR_DIMS,
-                        "index": True,
-                        "similarity": "cosine",
-                    },
                 }
             },
         }
         self.es.indices.create(index=self.index_name, body=mapping)
-        log.info("Created index '%s' (vector dims=%d)", self.index_name, _VECTOR_DIMS)
+        log.info("Created index '%s'", self.index_name)
 
     def _has_data(self):
         """Return True if the index already contains documents."""
@@ -115,7 +86,6 @@ class AICandidateDB:
                     nam_sinh = int(row["Nam_Sinh"]) if row["Nam_Sinh"] else 0
 
                     doc_id = hashlib.md5(f"{name}|{chuc_vu}".encode()).hexdigest()
-                    vector = self._model.encode(chuc_vu).tolist()
 
                     yield {
                         "_index": self.index_name,
@@ -124,7 +94,6 @@ class AICandidateDB:
                             "Ten": name,
                             "Nam_Sinh": nam_sinh,
                             "Chuc_Vu": chuc_vu,
-                            "vector_chuc_vu": vector,
                         },
                     }
 
@@ -135,22 +104,14 @@ class AICandidateDB:
             log.error("Bulk sync failed: %s", exc)
 
     def search(self, user_input, limit=5, return_debug=False):
-        """Run a hybrid lexical + KNN vector search.
+        """Run a lexical full-text search.
 
         Returns a list of tuples: (name, birth_year, position, score).
         """
         query_text = self._normalise(user_input)
-        query_vector = self._model.encode(query_text).tolist()
 
         body = {
             "size": limit,
-            "knn": {
-                "field": "vector_chuc_vu",
-                "query_vector": query_vector,
-                "k": limit,
-                "num_candidates": constants.KNN_NUM_CANDIDATES,
-                "boost": 3.0,
-            },
             "query": {
                 "bool": {
                     "should": [

@@ -15,7 +15,7 @@ services:
       - esdata:/usr/share/elasticsearch/data
     mem_limit: 1.5g
     healthcheck:
-      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health || exit 1"]
+      test: ["CMD-SHELL", "curl --fail --silent --user elastic:$${ELASTIC_PASSWORD} http://localhost:9200/_cluster/health > /dev/null || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -24,6 +24,8 @@ services:
     build: .
     container_name: lanh-dao-api
     env_file: .env
+    environment:
+      - ES_PASS=${ELASTIC_PASSWORD}
     ports:
       - "8000:8000"
     depends_on:
