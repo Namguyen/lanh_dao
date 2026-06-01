@@ -6,7 +6,7 @@ services:
       - discovery.type=single-node
       - xpack.security.enabled=true
       - ELASTIC_USERNAME=elastic
-      - ELASTIC_PASSWORD=${ES_PASS}
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD}
       - xpack.security.http.ssl.enabled=false
       - ES_JAVA_OPTS=-Xms512m -Xmx1g
     ports:
@@ -33,3 +33,4 @@ services:
 
 volumes:
   esdata:
+    driver: local

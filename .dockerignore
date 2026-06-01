@@ -1,0 +1,8 @@
+.env
+.git
+.gitignore
+.dockerignore
+__pycache__/
+*.py[cod]
+.pytest_cache/
+tests/
