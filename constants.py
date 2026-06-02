@@ -4,6 +4,8 @@ from typing import Final
 
 # News domain filtering
 OFFICIAL_NEWS_DOMAINS: Final[set[str]] = {
+    # Government portals. Matching also allows any subdomain of gov.vn.
+    "gov.vn",
     "chinhphu.vn",
     "baochinhphu.vn",
     "nhandan.vn",

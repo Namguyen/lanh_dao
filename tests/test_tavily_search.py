@@ -13,7 +13,7 @@ class TavilySearchTests(unittest.TestCase):
             "results": [
                 {
                     "title": "To Lam meets leaders",
-                    "url": "https://example.com/to-lam",
+                    "url": "https://chinhphu.vn/to-lam",
                     "content": "To Lam met leaders in Hanoi.",
                     "published_date": "Mon, 01 Jun 2026 08:00:00 GMT",
                 }
@@ -40,7 +40,7 @@ class TavilySearchTests(unittest.TestCase):
                     "title": "To Lam meets leaders",
                     "snippet": "To Lam met leaders in Hanoi.",
                     "date": "Mon, 01 Jun 2026 08:00:00 GMT",
-                    "link": "https://example.com/to-lam",
+                    "link": "https://chinhphu.vn/to-lam",
                 }
             ],
         )
@@ -55,7 +55,7 @@ class TavilySearchTests(unittest.TestCase):
                     "title": "To Lam meets leaders",
                     "snippet": "To Lam met leaders in Hanoi.",
                     "date": "01/06/2026",
-                    "link": "https://example.com/to-lam",
+                    "link": "https://chinhphu.vn/to-lam",
                 }
             ],
         ]
@@ -71,6 +71,42 @@ class TavilySearchTests(unittest.TestCase):
         self.assertEqual(general_payload["topic"], "general")
         self.assertEqual(general_payload["time_range"], "month")
         self.assertEqual(general_payload["country"], "vietnam")
+        self.assertEqual(
+            news_payload["include_domains"],
+            sorted(ai_service.constants.OFFICIAL_NEWS_DOMAINS),
+        )
+
+    @patch.object(ai_service.config, "TAVILY_API_KEY", "tvly-test-key")
+    @patch("ai_service._search_tavily")
+    def test_get_internet_info_rejects_foreign_and_social_sources(self, mock_search):
+        mock_search.side_effect = [
+            [
+                {
+                    "title": "To Lam meets leaders",
+                    "snippet": "To Lam met leaders.",
+                    "date": "01/06/2026",
+                    "link": "https://reuters.com/to-lam",
+                },
+                {
+                    "title": "To Lam meeting video",
+                    "snippet": "To Lam met leaders.",
+                    "date": "01/06/2026",
+                    "link": "https://youtube.com/watch?v=1",
+                },
+            ],
+            [],
+        ]
+
+        result = ai_service.get_internet_info("To Lam", person_name="To Lam")
+
+        self.assertNotIn("Tin 1", result)
+        self.assertNotIn("reuters.com", result)
+        self.assertNotIn("youtube.com", result)
+
+    def test_gov_vn_subdomains_are_allowed(self):
+        self.assertTrue(ai_service._is_official_domain("mofa.gov.vn"))
+        self.assertTrue(ai_service._is_official_domain("example.gov.vn"))
+        self.assertFalse(ai_service._is_official_domain("example.gov.vn.evil.test"))
 
 
 if __name__ == "__main__":

@@ -216,6 +216,7 @@ def get_internet_info(query, person_name=None):
         "search_depth": "basic",
         "include_answer": False,
         "include_raw_content": False,
+        "include_domains": sorted(constants.OFFICIAL_NEWS_DOMAINS),
         "exclude_domains": sorted(constants.BLOCKED_NEWS_DOMAINS),
         # Fetch a wider candidate pool, then deduplicate and trim to final size.
         "max_results": max(config.TAVILY_MAX_RESULTS * 3, config.TAVILY_MAX_RESULTS),
@@ -262,8 +263,14 @@ def get_internet_info(query, person_name=None):
     if not results:
         return "Không có tin tức nào được tìm thấy trên Internet trong thời gian gần đây."
 
-    # Hard-block social media, blogs, and tabloid sources.
-    results = [r for r in results if not _is_blocked_domain(_extract_domain(r.get("link", "")))]
+    # Defense in depth: Tavily receives an allowlist, and results are checked
+    # again locally so foreign, social, blog, and tabloid sources never leak.
+    results = [
+        result
+        for result in results
+        if _is_official_domain(_extract_domain(result.get("link", "")))
+        and not _is_blocked_domain(_extract_domain(result.get("link", "")))
+    ]
     if not results:
         return "Không có tin tức nào từ nguồn báo chí chính thống trong thời gian gần đây."
 
@@ -271,13 +278,8 @@ def get_internet_info(query, person_name=None):
     if with_time:
         results = with_time
 
-    # Keep higher-trust sources first and push lower-trust domains down.
+    # Keep government and dated sources first.
     results = sorted(results, key=_result_priority_tuple, reverse=True)
-
-    # If official sources exist, keep only official sources for cleaner output.
-    official_results = [r for r in results if _is_official_domain(_extract_domain(r.get("link", "")))]
-    if official_results:
-        results = official_results
 
     # Deduplicate results covering the same event (title similarity).
     results = _deduplicate_results(results)

@@ -170,7 +170,7 @@ def process_query(user_input: str, db) -> dict:
     timings_ms: dict[str, int] = {
         "intent": 0,
         "retrieval": 0,
-        "filter": 0,
+        "filtering": 0,
         "internet": 0,
         "answer": 0,
     }
@@ -276,7 +276,7 @@ def process_query(user_input: str, db) -> dict:
         strict_candidates,
         highest_score,
     ) = _filter_and_build(all_results, search_mode, user_input, entity_only)
-    timings_ms["filter"] = int((time.perf_counter() - t0) * 1000)
+    timings_ms["filtering"] = int((time.perf_counter() - t0) * 1000)
 
     # Stage 3b: Name-overlap guard (person-name queries only).
     if search_mode == "SINGLE" and best_person is not None and not _is_role_like_query(_normalise_text(entity_only)):
