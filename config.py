@@ -29,12 +29,12 @@ DEEPSEEK_MODEL: Final[str] = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
 DEEPSEEK_MODEL_FAST: Final[str] = os.getenv("DEEPSEEK_MODEL_FAST", DEEPSEEK_MODEL)
 
 
-# Web search (Serper) configuration
-SERPER_API_KEY: Final[str] = os.getenv("SERPER_API_KEY", "")
-SERPER_URL: Final[str] = "https://google.serper.dev/search"
-SERPER_NEWS_URL: Final[str] = "https://google.serper.dev/news"
-SERPER_TIMEOUT_SECONDS: Final[int] = 10
-SERPER_MAX_RESULTS: Final[int] = 3
+# Web search (Tavily) configuration
+TAVILY_API_KEY: Final[str] = os.getenv("TAVILY_API_KEY", "")
+TAVILY_URL: Final[str] = "https://api.tavily.com/search"
+TAVILY_TIMEOUT_SECONDS: Final[int] = 10
+TAVILY_MAX_RESULTS: Final[int] = 3
+TAVILY_NEWS_DAYS: Final[int] = 30
 
 
 def validate_config() -> bool:
@@ -46,8 +46,8 @@ def validate_config() -> bool:
     if not ES_PASS:
         log.warning("ES_PASS is empty (insecure for production)")
 
-    if not SERPER_API_KEY:
-        log.warning("SERPER_API_KEY is not set (internet search disabled)")
+    if not TAVILY_API_KEY:
+        log.warning("TAVILY_API_KEY is not set (internet search disabled)")
 
     if errors:
         for error in errors:

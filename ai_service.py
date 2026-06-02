@@ -1,6 +1,5 @@
-"""Web search service using the Serper API for real-time news retrieval."""
+"""Web search service using the Tavily API for real-time news retrieval."""
 
-import json
 import logging
 import re
 from urllib.parse import urlparse
@@ -165,66 +164,99 @@ def _deduplicate_results(results):
     return unique
 
 
+def _normalise_tavily_results(results):
+    """Map Tavily fields to the existing news-filtering shape."""
+    return [
+        {
+            "title": result.get("title", ""),
+            "snippet": result.get("content", ""),
+            "date": result.get("published_date", ""),
+            "link": result.get("url", ""),
+        }
+        for result in results
+    ]
+
+
+def _search_tavily(payload):
+    response = requests.post(
+        config.TAVILY_URL,
+        headers={
+            "Authorization": f"Bearer {config.TAVILY_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=config.TAVILY_TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    return _normalise_tavily_results(response.json().get("results", []))
+
+
+def _keep_relevant_results(results, person_name):
+    if not person_name:
+        return results
+    return [result for result in results if _is_result_relevant_to_person(result, person_name)]
+
+
 def get_internet_info(query, person_name=None):
     """Search for recent Vietnamese news articles related to the query.
 
     Returns a formatted multi-line string of results, or a fallback message
     if no results are found or the request fails.
 
-    Uses the Serper News endpoint first (purpose-built for news articles),
-    then falls back to general search with a time filter if needed.
+    Uses Tavily's news topic first, then falls back to general search with a
+    monthly time filter if needed.
     """
-    headers = {
-        "X-API-KEY": config.SERPER_API_KEY,
-        "Content-Type": "application/json",
-    }
+    if not config.TAVILY_API_KEY:
+        log.warning("TAVILY_API_KEY is not set; skipping internet search")
+        return "Internet search is disabled: TAVILY_API_KEY is not set."
 
+    search_query = f'"{person_name or query}" Vietnam'
     base_payload = {
-        "q": query,
-        "hl": "vi",
-        "gl": "vn",
+        "query": search_query,
+        "search_depth": "basic",
+        "include_answer": False,
+        "include_raw_content": False,
+        "exclude_domains": sorted(constants.BLOCKED_NEWS_DOMAINS),
         # Fetch a wider candidate pool, then deduplicate and trim to final size.
-        "num": max(config.SERPER_MAX_RESULTS * 3, config.SERPER_MAX_RESULTS),
+        "max_results": max(config.TAVILY_MAX_RESULTS * 3, config.TAVILY_MAX_RESULTS),
     }
 
     results = None
 
-    # Primary: dedicated News endpoint for higher-quality news results
+    # Primary: Tavily news topic for recent results with publication dates.
     try:
-        resp = requests.post(
-            config.SERPER_NEWS_URL,
-            headers=headers,
-            data=json.dumps(base_payload),
-            timeout=config.SERPER_TIMEOUT_SECONDS,
+        results = _search_tavily(
+            {
+                **base_payload,
+                "topic": "news",
+                "days": config.TAVILY_NEWS_DAYS,
+            }
         )
-        resp.raise_for_status()
-        data = resp.json()
-        results = data.get("news")
+        results = _keep_relevant_results(results, person_name)
         if results:
-            log.info("News endpoint returned %d results for: %s", len(results), query)
+            log.info("Tavily news search returned %d results for: %s", len(results), query)
     except requests.RequestException as exc:
-        log.warning("Serper News API failed (%s), falling back to general search", exc)
+        log.warning("Tavily news search failed (%s), falling back to general search", exc)
 
-    # Fallback: general search with month time-filter
+    # Fallback: Tavily general search with a monthly time filter.
     if not results:
         try:
-            fallback_payload = {**base_payload, "tbs": "qdr:m"}
-            resp = requests.post(
-                config.SERPER_URL,
-                headers=headers,
-                data=json.dumps(fallback_payload),
-                timeout=config.SERPER_TIMEOUT_SECONDS,
+            results = _search_tavily(
+                {
+                    **base_payload,
+                    "topic": "general",
+                    "time_range": "month",
+                    "country": "vietnam",
+                }
             )
-            resp.raise_for_status()
-            data = resp.json()
-            results = data.get("organic")
+            results = _keep_relevant_results(results, person_name)
             if results:
-                log.info("General search fallback returned %d results for: %s", len(results), query)
+                log.info("Tavily general fallback returned %d results for: %s", len(results), query)
         except requests.Timeout:
-            log.warning("Serper API timed out for query: %s", query)
+            log.warning("Tavily API timed out for query: %s", query)
             return "Không thể kết nối internet: hết thời gian chờ."
         except requests.RequestException as exc:
-            log.error("Serper API request failed: %s", exc)
+            log.error("Tavily API request failed: %s", exc)
             return f"Không thể kết nối internet. Chi tiết: {exc}"
 
     if not results:
@@ -234,10 +266,6 @@ def get_internet_info(query, person_name=None):
     results = [r for r in results if not _is_blocked_domain(_extract_domain(r.get("link", "")))]
     if not results:
         return "Không có tin tức nào từ nguồn báo chí chính thống trong thời gian gần đây."
-
-    relevant = [r for r in results if _is_result_relevant_to_person(r, person_name)]
-    if relevant:
-        results = relevant
 
     with_time = [r for r in results if _has_concrete_time_hint(r)]
     if with_time:
@@ -254,7 +282,7 @@ def get_internet_info(query, person_name=None):
     # Deduplicate results covering the same event (title similarity).
     results = _deduplicate_results(results)
 
-    results = results[:config.SERPER_MAX_RESULTS]
+    results = results[:config.TAVILY_MAX_RESULTS]
 
     lines = []
     for idx, res in enumerate(results, start=1):

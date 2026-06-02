@@ -10,7 +10,6 @@ from datetime import datetime
 
 from openai import OpenAI
 
-from ai_service import get_internet_info
 import config
 import constants
 

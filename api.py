@@ -1,4 +1,5 @@
 import functools
+import asyncio
 import logging
 import re
 import time
@@ -27,20 +28,33 @@ def _cached_process_query(question: str):
     return process_query(question, db)
 
 db: Optional[AICandidateDB] = None
+_DB_CONNECT_ATTEMPTS = 12
+_DB_CONNECT_RETRY_SECONDS = 3
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global db
-    try:
-        # Validate configuration before starting
-        if not config.validate_config():
-            log.error("Configuration validation failed. Starting with limited functionality.")
-        
-        db = AICandidateDB(verify_certs=False)  
-        log.info("Database connection established.")
-    except Exception as exc:
-        log.error("Failed to connect to database on startup: %s", exc)
-        db = None
+    # Validate configuration before starting
+    if not config.validate_config():
+        log.error("Configuration validation failed. Starting with limited functionality.")
+
+    for attempt in range(1, _DB_CONNECT_ATTEMPTS + 1):
+        try:
+            db = AICandidateDB(verify_certs=False)
+            log.info("Database connection established.")
+            break
+        except Exception as exc:
+            db = None
+            if attempt == _DB_CONNECT_ATTEMPTS:
+                log.error("Failed to connect to database after %d attempts: %s", attempt, exc)
+                break
+            log.warning(
+                "Database unavailable on startup (attempt %d/%d): %s",
+                attempt,
+                _DB_CONNECT_ATTEMPTS,
+                exc,
+            )
+            await asyncio.sleep(_DB_CONNECT_RETRY_SECONDS)
     yield
     db = None
 
